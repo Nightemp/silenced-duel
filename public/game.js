@@ -6,6 +6,8 @@
    и юнит меняет позу/поведение (стреляет другой рукой, стоит на
    одной ноге и т.д.)
    Карты: "Дикий Запад" (солнечный день) и "Тёмный переулок" (ночь).
+   Режимы: дуэль против бота (3 уровня сложности) и онлайн-дуэль 1×1
+   через WebSocket-матчмейкинг на сервере.
    ============================================================ */
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
@@ -14,6 +16,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 const state = {
   screen: 'menu',          // menu | duel | result
   mapType: 'west',         // west | noir
+  mode: 'bot',              // bot | online
   round: 0,
   wins: 0,
   losses: 0,
@@ -31,9 +34,9 @@ const state = {
 };
 
 const BOTS = [
-  { name: 'Виктор "Тень"',   tie: 0x8b1a1a, accuracy: 0.55, reaction: [900, 1400] },
-  { name: 'Маркус Коул',     tie: 0x1a3a8b, accuracy: 0.70, reaction: [650, 1050] },
-  { name: 'Адам "Континенталь"', tie: 0xdaa520, accuracy: 0.85, reaction: [450, 800] },
+  { name: 'Виктор "Тень"',   tie: 0x8b1a1a, accuracy: 0.55, reaction: [900, 1400] },   // Лёгкий
+  { name: 'Маркус Коул',     tie: 0x1a3a8b, accuracy: 0.70, reaction: [650, 1050] },   // Средний
+  { name: 'Адам "Континенталь"', tie: 0xdaa520, accuracy: 0.85, reaction: [450, 800] }, // Тяжёлый
 ];
 
 // ---------- Three.js базовая настройка ----------
@@ -635,6 +638,7 @@ function playerFire() {
   muzzleFlash(state.shootHand === 'right' ? fpGunRight : fpGunLeft);
   screenKick();
   playSound('shot');
+  if (state.mode === 'online') sendOnline({ type: 'shot' });
 
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   const hittable = collectHittableMeshes(enemyUnit);
@@ -725,6 +729,7 @@ function resolveHit(unit, mesh, point) {
   const partKey = findPartKeyFromMesh(mesh);
   if (!partKey) return;
   playSound('hit');
+  if (state.mode === 'online') sendOnline({ type: 'hit', part: partKey });
 
   if (partKey === 'head') {
     const gunObj = state.shootHand === 'right' ? fpGunRight : fpGunLeft;
@@ -750,7 +755,7 @@ function resolveHit(unit, mesh, point) {
   }
 }
 
-// ---------- Урон игроку от бота ----------
+// ---------- Урон игроку от бота / соперника ----------
 function applyPlayerLimbHit(limbKey) {
   if (!state.playerLimbs[limbKey]) return;
   state.playerLimbs[limbKey] = false;
@@ -786,6 +791,16 @@ function muzzleFlash(gunObj) {
   muzzleLight.intensity = 6;
   muzzleLight.position.copy(gunObj.position);
   setTimeout(() => (muzzleLight.intensity = 0), 60);
+}
+function enemyMuzzleFlash() {
+  const eData = enemyUnit.userData;
+  const gunObj = eData.shootHand === 'left' ? eData.guns.left : eData.guns.right;
+  const pos = new THREE.Vector3();
+  gunObj.getWorldPosition(pos);
+  const light = new THREE.PointLight(0xffdca0, 6, 4, 2);
+  light.position.copy(pos);
+  scene.add(light);
+  setTimeout(() => scene.remove(light), 60);
 }
 function screenKick() {
   camera.rotation.z += (Math.random() - 0.5) * 0.01;
@@ -859,6 +874,7 @@ const hud = document.getElementById('hud');
 const countdownEl = document.getElementById('countdown');
 
 function startDuel(botIdx) {
+  state.mode = 'bot';
   state.botIndex = botIdx;
   state.bot = BOTS[botIdx];
   resetUnits();
@@ -887,7 +903,8 @@ function resetUnits() {
   playerUnit.position.set(0, 0, 4.6);
   scene.add(playerUnit);
 
-  enemyUnit = buildHumanoid(BOTS[state.botIndex].tie, state.mapType);
+  const enemyTie = state.mode === 'online' ? 0x555555 : BOTS[state.botIndex].tie;
+  enemyUnit = buildHumanoid(enemyTie, state.mapType);
   enemyUnit.position.set(0, 0, -4.6);
   enemyUnit.rotation.y = Math.PI;
   scene.add(enemyUnit);
@@ -918,7 +935,7 @@ function runCountdown() {
       countdownEl.classList.add('hidden');
       countdownEl.classList.remove('fire');
       state.duelPhase = 'fight';
-      scheduleBotShot();
+      if (state.mode === 'bot') scheduleBotShot();
     }
   }, 700);
 }
@@ -939,10 +956,17 @@ function showResult(won) {
   resultPanel.classList.remove('hidden');
   document.getElementById('result-title').textContent = won ? 'ЦЕЛЬ УСТРАНЕНА' : 'ВЫ УБИТЫ';
   document.getElementById('result-title').style.color = won ? '#4dd0a8' : '#ff2d55';
-  document.getElementById('result-sub').textContent = won
-    ? `${state.bot.name} повержен.`
-    : `${state.bot.name} оказался быстрее.`;
-  reportGamePlayed(won);
+
+  if (state.mode === 'online') {
+    document.getElementById('result-sub').textContent = won
+      ? 'Соперник повержен.'
+      : 'Соперник оказался быстрее.';
+  } else {
+    document.getElementById('result-sub').textContent = won
+      ? `${state.bot.name} повержен.`
+      : `${state.bot.name} оказался быстрее.`;
+    reportGamePlayed(won);
+  }
 }
 
 document.getElementById('btn-menu').addEventListener('click', () => {
@@ -950,7 +974,10 @@ document.getElementById('btn-menu').addEventListener('click', () => {
   document.getElementById('menu').classList.remove('hidden');
   state.screen = 'menu';
 });
-document.getElementById('btn-retry').addEventListener('click', () => startDuel(state.botIndex));
+document.getElementById('btn-retry').addEventListener('click', () => {
+  if (state.mode === 'online') startFindOnline();
+  else startDuel(state.botIndex);
+});
 
 document.querySelectorAll('.bot-card').forEach((card, idx) => {
   card.addEventListener('click', () => startDuel(idx));
@@ -969,17 +996,41 @@ if (mapButtons.noir) mapButtons.noir.addEventListener('click', () => { applyMapT
 applyMapTheme(state.mapType);
 refreshMapButtons();
 
-// ---------- Онлайн-счётчик и число сыгранных дуэлей ----------
+// ---------- Онлайн-счётчик, число сыгранных дуэлей и PvP-матчмейкинг ----------
 let ws;
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   try {
     ws = new WebSocket(`${proto}://${location.host}`);
     ws.onmessage = ev => {
-      const data = JSON.parse(ev.data);
-      if (data.type === 'stats') {
-        document.getElementById('online-count').textContent = data.online;
-        document.getElementById('played-count').textContent = data.played;
+      let data;
+      try { data = JSON.parse(ev.data); } catch { return; }
+
+      switch (data.type) {
+        case 'stats':
+          document.getElementById('online-count').textContent = data.online;
+          document.getElementById('played-count').textContent = data.played;
+          break;
+        case 'duel_found':
+          startOnlineDuel();
+          break;
+        case 'duel_start':
+          runCountdown();
+          break;
+        case 'opponent_shot':
+          enemyMuzzleFlash();
+          playSound('shot');
+          break;
+        case 'you_were_hit':
+          if (data.part === 'head' || data.part === 'torso') {
+            endRound(false);
+          } else {
+            applyPlayerLimbHit(data.part);
+          }
+          break;
+        case 'opponent_left':
+          handleOpponentLeft();
+          break;
       }
     };
     ws.onclose = () => setTimeout(connectWS, 2000);
@@ -987,11 +1038,51 @@ function connectWS() {
 }
 connectWS();
 
-function reportGamePlayed(won) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'game_played', won }));
-  }
+function sendOnline(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
+
+function reportGamePlayed(won) {
+  sendOnline({ type: 'game_played', won });
+}
+
+function handleOpponentLeft() {
+  if (state.screen !== 'duel' || state.duelPhase === 'resolved') return;
+  state.duelPhase = 'resolved';
+  hud.classList.add('hidden');
+  resultPanel.classList.remove('hidden');
+  document.getElementById('result-title').textContent = 'СОПЕРНИК ОТКЛЮЧИЛСЯ';
+  document.getElementById('result-title').style.color = '#9aa';
+  document.getElementById('result-sub').textContent = 'Матч прерван раньше времени.';
+}
+
+function startFindOnline() {
+  document.getElementById('waiting-overlay').classList.remove('hidden');
+  sendOnline({ type: 'find_duel' });
+}
+function cancelFindOnline() {
+  document.getElementById('waiting-overlay').classList.add('hidden');
+  sendOnline({ type: 'cancel_find' });
+}
+function startOnlineDuel() {
+  document.getElementById('waiting-overlay').classList.add('hidden');
+  state.mode = 'online';
+  resetUnits();
+
+  enemyUnit.remove(enemyLabel);
+  enemyLabel = makeLabel('Соперник');
+  enemyUnit.add(enemyLabel);
+
+  state.screen = 'duel';
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('result').classList.add('hidden');
+  hud.classList.remove('hidden');
+
+  sendOnline({ type: 'ready' });
+}
+
+document.getElementById('btn-online').addEventListener('click', startFindOnline);
+document.getElementById('btn-cancel-find').addEventListener('click', cancelFindOnline);
 
 // ---------- Основной цикл рендера ----------
 const clock = new THREE.Clock();
