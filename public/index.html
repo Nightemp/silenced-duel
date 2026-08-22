@@ -15,7 +15,8 @@
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
   html,body{margin:0; padding:0; height:100%; overflow:hidden; background:#05070c; font-family: 'Segoe UI', system-ui, sans-serif; color:var(--ink);}
-  #game-canvas{position:fixed; inset:0; width:100%; height:100%; display:block;}
+  #game-canvas{position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none;}
+  #game-canvas.bullet-time{ filter: saturate(0.3) contrast(1.18) brightness(1.08); }
 
   .hidden{display:none !important;}
 
@@ -40,6 +41,15 @@
     margin:6px 0 0; font-size:12px; letter-spacing:5px; color:var(--accent-red);
     text-transform:uppercase; font-weight:600;
   }
+
+  .map-toggle{ display:flex; gap:8px; width:100%; max-width:380px; }
+  .map-btn{
+    flex:1; text-align:center; padding:10px 8px; border-radius:10px;
+    border:1px solid var(--panel-border); background:var(--panel);
+    font-size:12px; font-weight:700; letter-spacing:1px; color:#9aa;
+    cursor:pointer; transition:border-color .15s ease, color .15s ease;
+  }
+  .map-btn.active{ border-color:var(--accent-red); color:#fff; }
 
   .stats-row{ display:flex; gap:10px; }
   .stat-chip{
@@ -127,6 +137,8 @@
   }
   .btn.primary{ background:linear-gradient(135deg,#ff2d55,#b1102f); border-color:transparent; }
 
+  #fire-btn{ touch-action:manipulation; }
+
   @media (max-height: 640px){
     .title-wrap h1{ font-size:32px; letter-spacing:6px; }
   }
@@ -145,6 +157,11 @@
   <div class="stats-row">
     <div class="stat-chip"><span class="dot"></span> онлайн: <b id="online-count">—</b></div>
     <div class="stat-chip">🔫 сыграно: <b id="played-count">—</b></div>
+  </div>
+
+  <div class="map-toggle">
+    <div class="map-btn active" id="map-west">☀ ДИКИЙ ЗАПАД</div>
+    <div class="map-btn" id="map-noir">🌙 ТЁМНЫЙ ПЕРЕУЛОК</div>
   </div>
 
   <div class="bot-list" id="bot-list">
