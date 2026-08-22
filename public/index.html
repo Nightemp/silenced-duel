@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>SILENCED — Дуэль</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --accent-red:#ff2d55;
+    --accent-blue:#5566ff;
+    --ink:#e9ebf3;
+    --panel:#0b0d14ee;
+    --panel-border:#232636;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  html,body{margin:0; padding:0; height:100%; overflow:hidden; background:#05070c; font-family: 'Segoe UI', system-ui, sans-serif; color:var(--ink);}
+  #game-canvas{position:fixed; inset:0; width:100%; height:100%; display:block;}
+
+  .hidden{display:none !important;}
+
+  /* ---------- Меню ---------- */
+  #menu{
+    position:fixed; inset:0; z-index:20;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at 50% 20%, #14182a 0%, #05070c 65%);
+    padding: 24px;
+    gap: 18px;
+    overflow-y:auto;
+  }
+  .title-wrap{ text-align:center; margin-bottom:6px; }
+  .title-wrap h1{
+    font-size: 44px; letter-spacing: 9px; margin:0;
+    font-weight:800;
+    background: linear-gradient(180deg, #fff 10%, #a9adc4 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow: 0 0 40px rgba(85,102,255,0.25);
+  }
+  .title-wrap p{
+    margin:6px 0 0; font-size:12px; letter-spacing:5px; color:var(--accent-red);
+    text-transform:uppercase; font-weight:600;
+  }
+
+  .stats-row{ display:flex; gap:10px; }
+  .stat-chip{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+    padding:8px 16px; font-size:13px; display:flex; align-items:center; gap:8px;
+    min-width:120px; justify-content:center;
+  }
+  .stat-chip .dot{ width:8px; height:8px; border-radius:50%; background:#37d67a; box-shadow:0 0 8px #37d67a; }
+  .stat-chip b{ color:#fff; font-size:15px; }
+
+  .bot-list{ display:flex; flex-direction:column; gap:10px; width:100%; max-width:380px; }
+  .bot-card{
+    background:linear-gradient(135deg, #12141ff0, #0a0b12f0);
+    border:1px solid var(--panel-border); border-radius:14px;
+    padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .bot-card:active{ transform:scale(0.97); border-color:var(--accent-red); }
+  .bot-avatar{
+    width:46px; height:46px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #2a2d3a, #0c0d13);
+    border:2px solid var(--tie-color, #666);
+    flex-shrink:0;
+  }
+  .bot-info{ flex:1; }
+  .bot-info .name{ font-weight:700; font-size:15px; }
+  .bot-info .desc{ font-size:11px; color:#8b8fa8; margin-top:2px; letter-spacing:.5px; }
+  .bot-diff{ display:flex; gap:3px; }
+  .bot-diff span{ width:6px; height:14px; border-radius:2px; background:#232636; }
+  .bot-diff span.on{ background:var(--accent-red); }
+
+  .hint{ font-size:11px; color:#666a80; text-align:center; max-width:320px; line-height:1.6; margin-top:4px;}
+
+  /* ---------- HUD в игре ---------- */
+  #hud{ position:fixed; inset:0; z-index:10; pointer-events:none; }
+  #crosshair{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:22px; height:22px;
+  }
+  #crosshair::before, #crosshair::after{
+    content:''; position:absolute; background:rgba(233,235,243,0.85);
+  }
+  #crosshair::before{ left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
+  #crosshair::after{ top:50%; left:0; width:100%; height:2px; transform:translateY(-50%); }
+
+  #fire-btn{
+    position:absolute; right:24px; bottom:36px; width:84px; height:84px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #ff5470, #b1102f);
+    border:3px solid #ffffff33; box-shadow: 0 6px 20px rgba(255,45,85,0.4);
+    pointer-events:all; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; letter-spacing:2px; color:#fff;
+  }
+  #fire-btn:active{ transform:scale(0.92); }
+
+  #enemy-tag{
+    position:absolute; top:18px; left:50%; transform:translateX(-50%);
+    font-size:11px; letter-spacing:3px; color:#9aa; background:#0b0d14bb;
+    padding:6px 14px; border-radius:20px; border:1px solid var(--panel-border);
+  }
+
+  #countdown{
+    position:fixed; inset:0; z-index:15; display:flex; align-items:center; justify-content:center;
+    font-size:100px; font-weight:900; color:#fff; text-shadow:0 0 30px rgba(255,45,85,0.6);
+    pointer-events:none;
+  }
+  #countdown.fire{ color:var(--accent-red); font-size:64px; letter-spacing:6px; }
+
+  #damage-overlay{
+    position:fixed; inset:0; z-index:12; pointer-events:none;
+    background: radial-gradient(ellipse at center, rgba(200,0,20,0) 40%, rgba(160,0,10,0.65) 100%);
+    opacity:0; transition: opacity .12s ease;
+  }
+
+  /* ---------- Экран результата ---------- */
+  #result{
+    position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background: rgba(3,4,8,0.88); gap:14px; padding:24px; text-align:center;
+  }
+  #result-title{ font-size:32px; font-weight:900; letter-spacing:4px; }
+  #result-sub{ color:#9aa; font-size:14px; }
+  .btn{
+    margin-top:10px; padding:14px 30px; border-radius:10px; border:1px solid var(--panel-border);
+    background:linear-gradient(135deg,#1a1d2b,#0c0d14); color:#fff; font-weight:700; letter-spacing:2px;
+    font-size:13px; cursor:pointer;
+  }
+  .btn.primary{ background:linear-gradient(135deg,#ff2d55,#b1102f); border-color:transparent; }
+
+  @media (max-height: 640px){
+    .title-wrap h1{ font-size:32px; letter-spacing:6px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="menu">
+  <div class="title-wrap">
+    <h1>SILENCED</h1>
+    <p>дуэль один на один</p>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-chip"><span class="dot"></span> онлайн: <b id="online-count">—</b></div>
+    <div class="stat-chip">🔫 сыграно: <b id="played-count">—</b></div>
+  </div>
+
+  <div class="bot-list" id="bot-list">
+    <div class="bot-card" style="--tie-color:#8b1a1a">
+      <div class="bot-avatar"></div>
+      <div class="bot-info">
+        <div class="name">Виктор «Тень»</div>
+        <div class="desc">Медленная реакция, частые промахи</div>
+      </div>
+      <div class="bot-diff"><span class="on"></span><span></span><span></span></div>
+    </div>
+    <div class="bot-card" style="--tie-color:#1a3a8b">
+      <div class="bot-avatar"></div>
+      <div class="bot-info">
+        <div class="name">Маркус Коул</div>
+        <div class="desc">Уверенный стрелок Континенталя</div>
+      </div>
+      <div class="bot-diff"><span class="on"></span><span class="on"></span><span></span></div>
+    </div>
+    <div class="bot-card" style="--tie-color:#daa520">
+      <div class="bot-avatar"></div>
+      <div class="bot-info">
+        <div class="name">Адам «Континенталь»</div>
+        <div class="desc">Молниеносный, почти без промаха</div>
+      </div>
+      <div class="bot-diff"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+    </div>
+  </div>
+
+  <p class="hint">Проведите пальцем по экрану, чтобы прицелиться. Кнопка справа — выстрел.
+  Попадание в руку — переключит вас на другую руку. Попадание в ногу — собьёт с ног устойчивость соперника.</p>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="enemy-tag">СОПЕРНИК В 9 МЕТРАХ</div>
+  <div id="crosshair"></div>
+  <div id="fire-btn">ОГОНЬ</div>
+</div>
+
+<div id="countdown" class="hidden">3</div>
+<div id="damage-overlay"></div>
+
+<div id="result" class="hidden">
+  <div id="result-title">—</div>
+  <div id="result-sub">—</div>
+  <button class="btn primary" id="btn-retry">ЕЩЁ РАЗ</button>
+  <button class="btn" id="btn-menu">В МЕНЮ</button>
+</div>
+
+<script>
+  // Telegram Mini App: подгонка под тему/размер
+  if (window.Telegram && window.Telegram.WebApp) {
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+    try { tg.setBackgroundColor('#05070c'); } catch(e){}
+    try { tg.disableVerticalSwipes(); } catch(e){}
+  }
+</script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
