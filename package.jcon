@@ -1,0 +1,16 @@
+{
+  "name": "silenced-duel",
+  "version": "1.0.0",
+  "description": "Дуэльный 3D-шутер от первого лица для Telegram Mini App",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}
