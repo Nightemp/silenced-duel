@@ -1,3 +1,4 @@
+cat > /mnt/user-data/outputs/westduel/server.js << 'SERVEREOF'
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -22,31 +23,35 @@ const io = new Server(server);
 const ARENA_WIDTH = 800;
 const rooms = new Map();
 
-const SWORD_RANGE = 120, SWORD_COST = 20, SWORD_HEAD_CHANCE = 0.25, SWORD_HEAD_DMG = 20, SWORD_TORSO_DMG = 15;
-const KICK_RANGE = 70, KICK_COST = 15, KICK_LEGS_DMG = 22;
-const TAKEDOWN_RANGE = 55, TAKEDOWN_COST = 30;
-const GROUND_DURATION = 4000, GROUND_POUND_RANGE = 70, GROUND_POUND_MULT = 1.6;
-const KNOCKBACK_HEAD_TORSO = 26, KNOCKBACK_LEGS = 10, HITSTUN_MS = 180;
-const ESCAPE_INCREMENT = 14, ESCAPE_THRESHOLD = 100;
+const WEAPONS = {
+  usp: { name: 'USP (с глушителем)', damage: 16, critChance: 0.15, critMult: 2.2, fireRate: 260, accuracy: 0.88, range: 480, ammoMax: 12, reloadMs: 1100 },
+  deagle: { name: 'Дигл', damage: 30, critChance: 0.28, critMult: 2.4, fireRate: 600, accuracy: 0.72, range: 520, ammoMax: 7, reloadMs: 1500 },
+};
 
-const STAMINA_REGEN = 3, STAMINA_TICK_MS = 300, LEGS_SLOW_THRESHOLD = 40;
-const COUNTDOWN_MS = 3000, MIN_DIST = 44, COMBO_WINDOW_MS = 700, COMBO_MULT = 1.3;
+const HITSTUN_MS = 150;
+const STAGGER_MS = 700;
+const BLEEDOUT_DMG = 2;
+const BLEEDOUT_TICK_MS = 400;
+const TICK_MS = 200;
+const COUNTDOWN_MS = 3000;
+const MIN_DIST = 40;
 
 function newPlayerState(slot, name) {
   return {
     x: slot === 0 ? 150 : ARENA_WIDTH - 150,
     facing: slot === 0 ? 1 : -1,
-    hp: { head: 100, torso: 100, legs: 100 },
-    stamina: 100,
-    attacking: false,
+    hp: 100,
     slot,
     name: (name || 'Игрок').slice(0, 16),
-    lastHitType: null,
-    lastHitTime: 0,
-    grounded: false,
-    groundedUntil: 0,
+    weapon: 'usp',
+    ammo: { usp: WEAPONS.usp.ammoMax, deagle: WEAPONS.deagle.ammoMax },
+    reloading: false,
+    reloadEndAt: 0,
+    lastShotAt: 0,
+    staggered: false,
+    staggerUntil: 0,
+    downed: false,
     hitstunUntil: 0,
-    escapeProgress: 0,
   };
 }
 
@@ -56,13 +61,13 @@ function createRoom(roomId) {
 }
 
 function broadcastOnlineCount() { io.emit('online_count', io.engine.clientsCount); }
-function isDead(p) { return p.hp.head <= 0 || p.hp.torso <= 0; }
+function isDead(p) { return p.hp <= 0; }
 function inCountdown(room) { return room.startAt && Date.now() < room.startAt; }
 function inHitstun(p) { return p.hitstunUntil && Date.now() < p.hitstunUntil; }
 function clampX(x) { return Math.max(20, Math.min(ARENA_WIDTH - 20, x)); }
 
 function resolveCollision(mover, opponent) {
-  if (!opponent || opponent.grounded) return;
+  if (!opponent || opponent.downed) return;
   const diff = mover.x - opponent.x;
   if (Math.abs(diff) < MIN_DIST) mover.x = clampX(opponent.x + MIN_DIST * (diff < 0 ? -1 : 1));
 }
@@ -93,116 +98,96 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id] || inCountdown(room)) return;
     const p = room.players[socket.id];
-    if (isDead(p) || p.grounded || inHitstun(p)) return;
+    if (isDead(p) || p.downed || p.staggered || inHitstun(p)) return;
 
-    const speed = p.hp.legs <= LEGS_SLOW_THRESHOLD ? 5 : 10;
-    p.x = clampX(p.x + dir * speed);
-
+    p.x = clampX(p.x + dir * 8);
     const opponentId = room.order.find((id) => id !== socket.id);
-    if (opponentId) resolveCollision(p, room.players[opponentId]);
-
-    p.facing = dir !== 0 ? dir : p.facing;
+    const opponent = opponentId ? room.players[opponentId] : null;
+    if (opponent) {
+      resolveCollision(p, opponent);
+      p.facing = opponent.x > p.x ? 1 : -1;
+    }
     io.to(roomId).emit('state_update', room.players);
   });
 
-  socket.on('struggle', () => {
+  socket.on('switch_weapon', () => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id]) return;
     const p = room.players[socket.id];
-    if (!p.grounded) return;
-    p.escapeProgress = Math.min(100, (p.escapeProgress || 0) + ESCAPE_INCREMENT);
-    if (p.escapeProgress >= ESCAPE_THRESHOLD) {
-      p.grounded = false; p.groundedUntil = 0; p.escapeProgress = 0;
-    }
+    if (isDead(p) || p.downed) return;
+    p.weapon = p.weapon === 'usp' ? 'deagle' : 'usp';
     io.to(roomId).emit('state_update', room.players);
   });
 
-  socket.on('attack', ({ type }) => {
+  socket.on('fire', () => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id] || inCountdown(room)) return;
     const attacker = room.players[socket.id];
-    if (attacker.attacking || isDead(attacker) || attacker.grounded || inHitstun(attacker)) return;
+    if (isDead(attacker) || attacker.downed || attacker.staggered || inHitstun(attacker)) return;
+
+    const weapon = WEAPONS[attacker.weapon];
+    const now = Date.now();
+
+    if (attacker.reloading) { socket.emit('fire_failed', { reason: 'reloading' }); return; }
+    if (now - attacker.lastShotAt < weapon.fireRate) return;
+    if (attacker.ammo[attacker.weapon] <= 0) {
+      attacker.reloading = true;
+      attacker.reloadEndAt = now + weapon.reloadMs;
+      io.to(roomId).emit('reload_start', { slot: attacker.slot, weapon: attacker.weapon, ms: weapon.reloadMs });
+      io.to(roomId).emit('state_update', room.players);
+      return;
+    }
+
+    attacker.lastShotAt = now;
+    attacker.ammo[attacker.weapon]--;
 
     const opponentId = room.order.find((id) => id !== socket.id);
     const opponent = opponentId ? room.players[opponentId] : null;
 
-    // ---------- ТЕЙКДАУН ----------
-    if (type === 'takedown') {
-      if (attacker.stamina < TAKEDOWN_COST) { socket.emit('attack_failed'); return; }
-      attacker.stamina -= TAKEDOWN_COST;
-      attacker.attacking = true;
-      io.to(roomId).emit('attack_anim', { slot: attacker.slot, type: 'takedown' });
+    io.to(roomId).emit('shot_fired', { slot: attacker.slot, weapon: attacker.weapon });
 
-      if (opponent && !isDead(opponent) && !opponent.grounded) {
-        const dist = Math.abs(opponent.x - attacker.x);
-        const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) || (attacker.facing === -1 && opponent.x < attacker.x);
-        if (dist < TAKEDOWN_RANGE && facingCorrect) {
-          const chance = Math.max(0.25, Math.min(0.85, 0.55 + (attacker.stamina - opponent.stamina) / 300));
-          const success = Math.random() < chance;
-          if (success) { opponent.grounded = true; opponent.groundedUntil = Date.now() + GROUND_DURATION; opponent.escapeProgress = 0; }
-          io.to(roomId).emit('takedown_result', { slot: opponent.slot, success });
-        } else {
-          io.to(roomId).emit('takedown_result', { slot: opponent.slot, success: false, whiffed: true });
-        }
-      }
-      io.to(roomId).emit('state_update', room.players);
-      setTimeout(() => { attacker.attacking = false; }, 600);
-      return;
-    }
-
-    // ---------- МЕЧ / ПИНОК (в т.ч. добивание лежащего) ----------
-    const isKick = type === 'kick';
-    const cost = isKick ? KICK_COST : SWORD_COST;
-    if (attacker.stamina < cost) { socket.emit('attack_failed'); return; }
-
-    attacker.stamina -= cost;
-    attacker.attacking = true;
-    io.to(roomId).emit('attack_anim', { slot: attacker.slot, type: isKick ? 'kick' : 'sword' });
-
+    let result = { hit: false };
     if (opponent && !isDead(opponent)) {
       const dist = Math.abs(opponent.x - attacker.x);
-      let landed = false;
-      if (opponent.grounded) {
-        landed = dist < GROUND_POUND_RANGE;
-      } else {
-        const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) || (attacker.facing === -1 && opponent.x < attacker.x);
-        const range = isKick ? KICK_RANGE : SWORD_RANGE;
-        landed = dist < range && facingCorrect;
-      }
+      if (dist <= weapon.range) {
+        const falloff = Math.max(0.6, 1 - (dist / weapon.range) * 0.4);
+        const hitChance = weapon.accuracy * falloff;
 
-      if (landed) {
-        let part, damage;
-        if (isKick) { part = 'legs'; damage = KICK_LEGS_DMG; }
-        else { part = Math.random() < SWORD_HEAD_CHANCE ? 'head' : 'torso'; damage = part === 'head' ? SWORD_HEAD_DMG : SWORD_TORSO_DMG; }
+        if (Math.random() < hitChance) {
+          const isCrit = !opponent.downed && Math.random() < weapon.critChance;
+          let damage;
+          if (opponent.downed) {
+            damage = 999; // добивание лежащего
+          } else {
+            damage = isCrit ? Math.round(weapon.damage * weapon.critMult) : weapon.damage;
+          }
+          opponent.hp = Math.max(0, opponent.hp - damage);
+          result = { hit: true, isCrit, damage, downed: opponent.downed };
 
-        if (opponent.grounded) damage = Math.round(damage * GROUND_POUND_MULT);
+          if (!opponent.downed) opponent.hitstunUntil = now + HITSTUN_MS;
 
-        const now = Date.now();
-        let isCombo = false;
-        if (!opponent.grounded && attacker.lastHitType && attacker.lastHitType !== type && now - attacker.lastHitTime < COMBO_WINDOW_MS) {
-          damage = Math.round(damage * COMBO_MULT);
-          isCombo = true;
+          if (isCrit && !isDead(opponent) && !opponent.downed) {
+            opponent.staggered = true;
+            opponent.staggerUntil = now + STAGGER_MS;
+            const oppId = opponentId;
+            setTimeout(() => {
+              const stillRoom = rooms.get(roomId);
+              if (!stillRoom || !stillRoom.players[oppId]) return;
+              const op = stillRoom.players[oppId];
+              if (!isDead(op)) { op.staggered = false; op.downed = true; }
+              io.to(roomId).emit('state_update', stillRoom.players);
+            }, STAGGER_MS);
+          }
         }
-        attacker.lastHitType = type; attacker.lastHitTime = now;
-
-        opponent.hp[part] = Math.max(0, opponent.hp[part] - damage);
-
-        if (!opponent.grounded) {
-          const kb = part === 'legs' ? KNOCKBACK_LEGS : KNOCKBACK_HEAD_TORSO;
-          opponent.x = clampX(opponent.x + kb * attacker.facing);
-          opponent.hitstunUntil = now + HITSTUN_MS;
-        }
-
-        io.to(roomId).emit('hit', { slot: opponent.slot, part, damage, isCombo, grounded: !!opponent.grounded });
       }
     }
 
+    io.to(roomId).emit('shot_result', { attackerSlot: attacker.slot, targetSlot: opponent ? opponent.slot : null, ...result });
     io.to(roomId).emit('state_update', room.players);
-    if (opponent && isDead(opponent)) io.to(roomId).emit('game_over', { winnerSlot: attacker.slot });
 
-    setTimeout(() => { attacker.attacking = false; }, 500);
+    if (opponent && isDead(opponent)) io.to(roomId).emit('game_over', { winnerSlot: attacker.slot });
   });
 
   socket.on('disconnect', () => {
@@ -222,13 +207,31 @@ setInterval(() => {
   rooms.forEach((room, roomId) => {
     if (room.order.length < 2) return;
     let changed = false;
+    const now = Date.now();
+
     Object.values(room.players).forEach((p) => {
-      if (p.stamina < 100) { p.stamina = Math.min(100, p.stamina + STAMINA_REGEN); changed = true; }
-      if (p.grounded && p.groundedUntil <= Date.now()) { p.grounded = false; p.groundedUntil = 0; p.escapeProgress = 0; changed = true; }
+      if (p.reloading && p.reloadEndAt <= now) {
+        p.ammo[p.weapon] = WEAPONS[p.weapon].ammoMax;
+        p.reloading = false;
+        changed = true;
+      }
+      if (p.downed && !isDead(p)) {
+        p.hp = Math.max(0, p.hp - BLEEDOUT_DMG);
+        changed = true;
+      }
     });
-    if (changed) io.to(roomId).emit('state_update', room.players);
+
+    if (changed) {
+      io.to(roomId).emit('state_update', room.players);
+      Object.entries(room.players).forEach(([id, p]) => {
+        if (isDead(p)) {
+          const winnerId = room.order.find((oid) => oid !== id);
+          if (winnerId) io.to(roomId).emit('game_over', { winnerSlot: room.players[winnerId].slot });
+        }
+      });
+    }
   });
-}, STAMINA_TICK_MS);
+}, BLEEDOUT_TICK_MS);
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -240,9 +243,9 @@ bot.start((ctx) => {
 
   ctx.reply(
     payload
-      ? '⚔️ Ты присоединяешься к бою! Жми кнопку ниже.'
-      : `⚔️ Бой создан! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nКогда друг перейдёт по ней — начинайте бой.`,
-    { reply_markup: { inline_keyboard: [[{ text: '🗡 Открыть арену', web_app: { url: gameUrl } }]] } }
+      ? '🤠 Ты присоединяешься к дуэли! Жми кнопку ниже.'
+      : `🤠 Дуэль создана! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nИли играй один против бота прямо в игре.`,
+    { reply_markup: { inline_keyboard: [[{ text: '🔫 Открыть арену', web_app: { url: gameUrl } }]] } }
   );
 });
 
@@ -253,11 +256,12 @@ bot.catch((err, ctx) => {
 bot.launch().catch((err) => {
   console.error('Ошибка запуска бота (bot.launch):', err.message || err);
 });
-console.log('Бот запущен');
 
 server.listen(process.env.PORT || 3000, () => {
-  console.log('Сервер игры запущен');
+  console.log('Сервер West Duel запущен');
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+SERVEREOF
+echo done
