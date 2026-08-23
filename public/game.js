@@ -12,6 +12,70 @@
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
+// ---------- Telegram: игрок, тактильная отдача ----------
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+
+function haptic(kind) {
+  // kind: 'shot' | 'hit_taken' | 'kill' | 'win' | 'lose'
+  if (!tg || !tg.HapticFeedback) return;
+  try {
+    if (kind === 'shot') tg.HapticFeedback.impactOccurred('medium');
+    else if (kind === 'hit_taken') tg.HapticFeedback.notificationOccurred('error');
+    else if (kind === 'kill') tg.HapticFeedback.impactOccurred('heavy');
+    else if (kind === 'win') tg.HapticFeedback.notificationOccurred('success');
+    else if (kind === 'lose') tg.HapticFeedback.notificationOccurred('warning');
+  } catch (e) { /* haptics недоступны вне Telegram */ }
+}
+
+// ---------- Звания по числу побед (хранится на устройстве) ----------
+const RANKS = [
+  { min: 0,  title: 'Новичок' },
+  { min: 3,  title: 'Стрелок' },
+  { min: 8,  title: 'Дуэлянт' },
+  { min: 15, title: 'Наёмник' },
+  { min: 30, title: 'Мастер клинка и ствола' },
+  { min: 50, title: 'Легенда Континенталя' },
+];
+function rankFor(wins) {
+  let r = RANKS[0];
+  for (const entry of RANKS) if (wins >= entry.min) r = entry;
+  return r.title;
+}
+
+function loadLocalWins() {
+  const v = parseInt(localStorage.getItem('silenced_wins') || '0', 10);
+  return Number.isFinite(v) ? v : 0;
+}
+function saveLocalWins(v) {
+  try { localStorage.setItem('silenced_wins', String(v)); } catch (e) {}
+}
+function loadPlayerName() {
+  const stored = localStorage.getItem('silenced_name');
+  if (stored) return stored;
+  const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  return tgUser && tgUser.first_name ? tgUser.first_name : '';
+}
+function savePlayerName(name) {
+  try { localStorage.setItem('silenced_name', name); } catch (e) {}
+}
+
+let localWins = loadLocalWins();
+let playerName = loadPlayerName();
+
+const rankBadge = document.getElementById('rank-badge');
+const nameInput = document.getElementById('player-name');
+if (nameInput) {
+  nameInput.value = playerName;
+  nameInput.addEventListener('change', () => {
+    playerName = nameInput.value.trim().slice(0, 24);
+    savePlayerName(playerName);
+  });
+}
+function refreshRankBadge() {
+  if (rankBadge) rankBadge.textContent = `${rankFor(localWins)} · ${localWins} 🏆`;
+}
+refreshRankBadge();
+
 // ---------- Глобальное состояние ----------
 const state = {
   screen: 'menu',          // menu | duel | result
@@ -566,6 +630,30 @@ const muzzleLight = new THREE.PointLight(0xffdca0, 0, 4, 2);
 camera.add(muzzleLight);
 
 // ---------- Кровь: система частиц + лужи ----------
+// ---------- Трассер пули (для всех обычных выстрелов, не только хэдшотов) ----------
+const tracers = [];
+function spawnTracer(from, to) {
+  const dist = from.distanceTo(to);
+  if (dist < 0.01) return;
+  const mat = new THREE.MeshBasicMaterial({ color: 0xfff2c9, transparent: true, opacity: 0.85 });
+  const trail = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, dist, 6), mat);
+  trail.position.copy(from).lerp(to, 0.5);
+  trail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3().subVectors(to, from).normalize());
+  scene.add(trail);
+  tracers.push({ mesh: trail, life: 0, maxLife: 0.09 });
+}
+function updateTracers(dt) {
+  for (let i = tracers.length - 1; i >= 0; i--) {
+    const t = tracers[i];
+    t.life += dt;
+    t.mesh.material.opacity = 0.85 * (1 - t.life / t.maxLife);
+    if (t.life >= t.maxLife) {
+      scene.remove(t.mesh);
+      tracers.splice(i, 1);
+    }
+  }
+}
+
 const bloodParticles = [];
 function spawnBlood(position, count = 26) {
   const geo = new THREE.SphereGeometry(1, 4, 4);
@@ -773,6 +861,7 @@ function playerFire() {
   muzzleFlash(state.shootHand === 'right' ? fpGunRight : fpGunLeft, weapon);
   screenKick(weapon);
   playSound('shot', weapon);
+  haptic('shot');
   if (state.mode === 'online') sendOnline({ type: 'shot' });
 
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
@@ -782,6 +871,11 @@ function playerFire() {
     resolveHit(enemyUnit, hits[0].object, hits[0].point);
   } else {
     playSound('miss');
+    const gunObj = state.shootHand === 'right' ? fpGunRight : fpGunLeft;
+    const fromPos = new THREE.Vector3();
+    gunObj.getWorldPosition(fromPos);
+    const farPoint = fromPos.clone().addScaledVector(raycaster.ray.direction, 14);
+    spawnTracer(fromPos, farPoint);
   }
 }
 
@@ -873,10 +967,16 @@ function resolveHit(unit, mesh, point) {
     playHeadshotBulletCam(fromPos, point.clone(), () => {
       spawnBlood(point, 34);
       applyDamage(unit, 'head', state.weapon);
+      haptic('kill');
       if (unit === enemyUnit) endRound(true); else endRound(false);
     });
     return;
   }
+
+  const gunObj = state.shootHand === 'right' ? fpGunRight : fpGunLeft;
+  const fromPos = new THREE.Vector3();
+  gunObj.getWorldPosition(fromPos);
+  spawnTracer(fromPos, point.clone());
 
   spawnBlood(point, partKey === 'torso' ? 24 : 18);
   const result = applyDamage(unit, partKey, state.weapon);
@@ -888,6 +988,7 @@ function resolveHit(unit, mesh, point) {
   }
 
   if (result.lethal) {
+    haptic('kill');
     if (unit === enemyUnit) endRound(true); else endRound(false);
   }
 }
@@ -898,6 +999,8 @@ function applyPlayerLimbHit(limbKey) {
   state.playerLimbs[limbKey] = false;
   detachLimb(playerUnit, limbKey);
   flashDamage();
+  haptic('hit_taken');
+  triggerScreenShake(0.05);
 
   if (limbKey === 'rightArm' && state.shootHand === 'right') {
     if (state.playerLimbs.leftArm) switchShootingHand(playerUnit, 'left');
@@ -911,6 +1014,13 @@ function applyPlayerLimbHit(limbKey) {
 
 let playerLimping = false;
 let playerDeathFallT = 0;
+let screenShakeT = 0;
+let screenShakeAmp = 0;
+
+function triggerScreenShake(amp) {
+  screenShakeAmp = Math.max(screenShakeAmp, amp);
+  screenShakeT = 0.22;
+}
 
 /* Кровопотеря: раны в конечности продолжают отнимать HP какое-то время
    после попадания. Если это добивает юнита — вызывается onDeath (расчёт
@@ -1056,6 +1166,7 @@ function botFire(bot) {
 
   spawnBlood(toPos.clone().add(new THREE.Vector3(0, -0.2, -0.3)), partKey === 'torso' ? 22 : 14);
   const result = applyDamage(playerUnit, partKey, state.weapon);
+  if (partKey === 'torso') { haptic('hit_taken'); triggerScreenShake(0.09); flashDamage(); }
 
   if (partKey !== 'torso' && !result.lethal) {
     applyPlayerLimbHit(partKey);
@@ -1154,6 +1265,8 @@ function showResult(won) {
   document.getElementById('result-title').textContent = won ? 'ЦЕЛЬ УСТРАНЕНА' : 'ВЫ УБИТЫ';
   document.getElementById('result-title').style.color = won ? '#4dd0a8' : '#ff2d55';
 
+  haptic(won ? 'win' : 'lose');
+
   if (state.mode === 'online') {
     document.getElementById('result-sub').textContent = won
       ? 'Соперник повержен.'
@@ -1163,6 +1276,13 @@ function showResult(won) {
       ? `${state.bot.name} повержен.`
       : `${state.bot.name} оказался быстрее.`;
     reportGamePlayed(won);
+  }
+
+  if (won) {
+    localWins += 1;
+    saveLocalWins(localWins);
+    refreshRankBadge();
+    sendOnline({ type: 'report_win', name: playerName || 'Безымянный' });
   }
 }
 
@@ -1226,6 +1346,7 @@ function connectWS() {
         case 'stats':
           document.getElementById('online-count').textContent = data.online;
           document.getElementById('played-count').textContent = data.played;
+          renderLeaderboard(data.leaderboard || []);
           break;
         case 'duel_found':
           startOnlineDuel();
@@ -1240,6 +1361,7 @@ function connectWS() {
         case 'you_were_hit': {
           const weaponKey = WEAPONS[data.weapon] ? data.weapon : state.weapon;
           const result = applyDamage(playerUnit, data.part, weaponKey);
+          if (data.part === 'torso') { haptic('hit_taken'); triggerScreenShake(0.09); flashDamage(); }
           if (data.part !== 'torso' && data.part !== 'head' && !result.lethal) {
             applyPlayerLimbHit(data.part);
           }
@@ -1262,6 +1384,22 @@ function sendOnline(obj) {
 
 function reportGamePlayed(won) {
   sendOnline({ type: 'game_played', won });
+}
+
+function renderLeaderboard(list) {
+  const el = document.getElementById('leaderboard-list');
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = '<div class="leaderboard-empty">Пока никто не побеждал…</div>';
+    return;
+  }
+  el.innerHTML = list.map((row, i) => {
+    const mine = playerName && row.name === playerName;
+    return `<div class="leaderboard-row${mine ? ' me' : ''}"><span><span class="pos">${i + 1}.</span>${escapeHtml(row.name)}</span><span>${row.wins} 🏆</span></div>`;
+  }).join('');
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function handleOpponentLeft() {
@@ -1317,6 +1455,16 @@ function animate() {
   const limpOffset = playerLimping ? Math.sin(bobT * 5) * 0.05 : Math.sin(bobT * 1.2) * 0.006;
   camera.position.y = 1.7 + limpOffset;
   if (playerLimping) camera.rotation.z += Math.sin(bobT * 5) * 0.002;
+
+  if (screenShakeT > 0) {
+    screenShakeT -= dt;
+    const decay = Math.max(0, screenShakeT / 0.22);
+    camera.position.x += (Math.random() - 0.5) * screenShakeAmp * decay;
+    camera.position.y += (Math.random() - 0.5) * screenShakeAmp * decay;
+    if (screenShakeT <= 0) screenShakeAmp = 0;
+  }
+
+  updateTracers(dt);
 
   fallingParts.forEach(fp => {
     fp.life += dt;
