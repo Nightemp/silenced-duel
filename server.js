@@ -246,7 +246,13 @@ bot.start((ctx) => {
   );
 });
 
-bot.launch();
+bot.catch((err, ctx) => {
+  console.error(`Ошибка Telegraf при обработке update ${ctx.updateType}:`, err.message || err);
+});
+
+bot.launch().catch((err) => {
+  console.error('Ошибка запуска бота (bot.launch):', err.message || err);
+});
 console.log('Бот запущен');
 
 server.listen(process.env.PORT || 3000, () => {
