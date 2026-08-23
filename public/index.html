@@ -3,157 +3,122 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Silent Duel</title>
+<title>West Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
 <style>
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
-    background: #05060a; overflow: hidden; color: #fff;
+    background: #14100e; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    user-select: none; touch-action: none;
+    color: #fff; user-select: none; touch-action: none;
   }
-  #canvas-wrap { position: absolute; inset: 0; }
-  canvas { display: block; width: 100%; height: 100%; }
+  #arena { display: block; width: 100%; height: 100%; }
 
-  #crosshair {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 8px; height: 8px; border-radius: 50%;
-    border: 1.5px solid rgba(255,255,255,0.85);
-    z-index: 4; pointer-events: none;
-  }
-
-  #hit-marker {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    font-size: 26px; color: #ff3b3b; opacity: 0; z-index: 5; pointer-events: none;
-    text-shadow: 0 0 10px rgba(255,0,0,0.9);
-    transition: opacity 0.12s;
-  }
-  #hit-marker.show { opacity: 1; }
-
-  #xray-popup {
-    position: absolute; top: 70px; left: 50%; transform: translate(-50%, -10px);
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
-    opacity: 0; transition: opacity 0.2s, transform 0.2s; z-index: 6; pointer-events: none;
-  }
-  #xray-popup.show { opacity: 1; transform: translate(-50%, 0); }
-  #xray-figure { width: 46px; height: 90px; position: relative; }
-  #xray-figure .zone {
-    position: absolute; left: 50%; transform: translateX(-50%);
-    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4);
-    border-radius: 4px;
-  }
-  #xray-figure .zone.hit { background: rgba(255,50,50,0.85); border-color: #ff9a9a; }
-  #xray-head { top: 0; width: 20px; height: 20px; border-radius: 50%; }
-  #xray-torso { top: 22px; width: 26px; height: 34px; }
-  #xray-arm { top: 24px; width: 8px; height: 30px; left: 4px; transform: none; }
-  #xray-leg { top: 58px; width: 10px; height: 32px; }
-  #xray-label { font-size: 11px; color: #ffb3b3; font-weight: bold; text-shadow: 0 1px 4px #000; }
-
-  #ammo {
-    position: absolute; right: 20px; bottom: 150px; font-size: 15px;
-    color: #fff; text-shadow: 0 2px 4px #000; z-index: 4; font-weight: bold;
-  }
   #status {
-    position: absolute; top: 40%; left: 0; right: 0; text-align: center;
-    font-size: 18px; font-weight: bold; text-shadow: 0 2px 4px #000; z-index: 4; pointer-events: none;
+    position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
+    font-size: 17px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    pointer-events: none; z-index: 5;
   }
+
+  .hp-group { position: absolute; top: 10px; width: 40%; display: flex; flex-direction: column; gap: 3px; }
+  #hp-group-0 { left: 10px; }
+  #hp-group-1 { right: 10px; align-items: flex-end; }
+  .hp-name { font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.9); text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+  .hp-container { width: 100%; height: 12px; background: rgba(0,0,0,0.5); border: 1.5px solid rgba(255,255,255,0.8); border-radius: 6px; overflow: hidden; }
+  .hp-bar { height: 100%; width: 100%; transition: width 0.15s ease-out; background: linear-gradient(#c94b4b, #8f2f2f); }
+  #hp-bar-0 { background: linear-gradient(#5b9a5b, #3d6e3d); }
+
+  #ammo-wrap {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: 190px;
+    text-align: center; z-index: 5;
+  }
+  #weapon-name { font-size: 13px; font-weight: bold; color: #ffe066; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+  #ammo-count { font-size: 20px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
 
   #joystick-zone {
-    position: absolute; left: 24px; bottom: 40px; width: 120px; height: 120px;
-    border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.25);
-    z-index: 4;
+    position: absolute; left: 24px; bottom: 50px; width: 130px; height: 130px;
+    border-radius: 50%; background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3);
   }
   #joystick-knob {
-    position: absolute; left: 46px; top: 46px; width: 28px; height: 28px;
-    border-radius: 50%; background: rgba(255,255,255,0.75);
+    position: absolute; left: 51px; top: 51px; width: 28px; height: 28px;
+    border-radius: 50%; background: rgba(255,255,255,0.8);
   }
-  #look-zone { position: absolute; right: 0; top: 0; width: 60%; height: 100%; z-index: 3; }
 
   #fire-btn {
-    position: absolute; right: 26px; bottom: 46px; width: 92px; height: 92px;
-    border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff5a5a, #a11d1d 70%);
-    border: 3px solid #6e1010; color: #fff; font-weight: bold; font-size: 13px;
-    display: flex; align-items: center; justify-content: center; z-index: 4;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+    position: absolute; right: 24px; bottom: 50px; width: 120px; height: 120px;
+    border-radius: 50%; background: rgba(255,90,60,0.35); border: 2px solid rgba(255,140,100,0.6);
+    color: #fff; font-size: 16px; font-weight: bold; transition: opacity 0.2s;
   }
-  #fire-btn:active { filter: brightness(0.85); }
-  #fire-btn.reloading { filter: grayscale(0.7) brightness(0.6); }
+  #switch-btn {
+    position: absolute; right: 60px; bottom: 190px; width: 76px; height: 76px;
+    border-radius: 50%; background: rgba(120,140,220,0.3); border: 2px solid rgba(160,180,240,0.6);
+    color: #fff; font-size: 11px; font-weight: bold;
+  }
+  .btn-disabled { opacity: 0.35; }
+
+  #hit-flash {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(rgba(180,0,0,0.45), rgba(120,0,0,0.1) 70%);
+    opacity: 0; pointer-events: none; transition: opacity 0.1s; z-index: 4;
+  }
+  #xray-flash {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(160,220,255,0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.08s; z-index: 4;
+  }
 
   #menu-overlay {
-    position: absolute; inset: 0; z-index: 20;
-    background: linear-gradient(#0a0c12, #1a0808);
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(#2b1c12, #4a2f1a);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;
   }
-  #menu-title { font-size: 26px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 3px 10px #000; }
-  #nick-input {
-    width: 220px; padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
-    background: rgba(255,255,255,0.08); color: #fff; font-size: 15px; text-align: center;
+  #menu-title { font-size: 32px; font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; text-shadow: 0 3px 6px rgba(0,0,0,0.6); }
+  #menu-subtitle { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 26px; text-align: center; padding: 0 30px; line-height: 1.5; }
+  .diff-btn {
+    width: 230px; height: 54px; border-radius: 27px; border: none; margin-top: 10px;
+    font-size: 17px; font-weight: bold; letter-spacing: 0.5px; color: #1a1410;
   }
-  #nick-input::placeholder { color: rgba(255,255,255,0.4); }
-  #play-btn {
-    width: 200px; height: 52px; border-radius: 26px; border: none;
-    background: linear-gradient(#ffe066, #d9a521); color: #1a1410; font-size: 17px; font-weight: bold;
-  }
-  #play-btn:active { transform: scale(0.97); }
-  #share-btn {
-    width: 200px; height: 44px; border-radius: 22px; border: 1px solid rgba(255,255,255,0.25);
-    background: rgba(255,255,255,0.08); color: #fff; font-size: 13px;
-  }
-  #menu-stats { font-size: 12px; color: rgba(255,255,255,0.5); }
-  #menu-stats span { color: #ffe066; font-weight: bold; }
-
-  #ko-overlay {
-    position: absolute; inset: 0; z-index: 15; display: none;
-    align-items: center; justify-content: center; flex-direction: column; text-align: center;
-    background: radial-gradient(circle, rgba(120,0,0,0.55), rgba(0,0,0,0.92));
-  }
-  #ko-overlay.show { display: flex; }
-  #ko-text { font-size: 38px; font-weight: 900; color: #ffdf5e; text-shadow: 0 0 20px rgba(255,80,0,0.9); }
-  #ko-sub { margin-top: 8px; font-size: 15px; color: #fff; }
+  #diff-easy { background: linear-gradient(#8fd18f, #5aa35a); }
+  #diff-medium { background: linear-gradient(#ffe066, #e0a824); }
+  #diff-hard { background: linear-gradient(#ff8f6b, #d9502e); color: #fff; }
 </style>
 </head>
 <body>
-  <div id="canvas-wrap"></div>
-  <div id="crosshair"></div>
-  <div id="hit-marker">✕</div>
-  <div id="xray-popup">
-    <div id="xray-figure">
-      <div class="zone" id="xray-head"></div>
-      <div class="zone" id="xray-torso"></div>
-      <div class="zone" id="xray-arm"></div>
-      <div class="zone" id="xray-leg"></div>
-    </div>
-    <div id="xray-label"></div>
-  </div>
-  <div id="ammo">7 / 7</div>
-  <div id="status"></div>
 
-  <div id="look-zone"></div>
-  <div id="joystick-zone"><div id="joystick-knob"></div></div>
-  <div id="fire-btn">ОГОНЬ</div>
+<canvas id="arena"></canvas>
+<div id="hit-flash"></div>
+<div id="xray-flash"></div>
+<div id="status"></div>
 
-  <div id="ko-overlay">
-    <div id="ko-text"></div>
-    <div id="ko-sub"></div>
-  </div>
+<div class="hp-group" id="hp-group-0">
+  <div class="hp-name" id="name-0">Ты</div>
+  <div class="hp-container"><div class="hp-bar" id="hp-bar-0"></div></div>
+</div>
+<div class="hp-group" id="hp-group-1">
+  <div class="hp-name" id="name-1">Бот</div>
+  <div class="hp-container"><div class="hp-bar" id="hp-bar-1"></div></div>
+</div>
 
-  <div id="menu-overlay">
-    <div id="menu-title">🔫 SILENT DUEL</div>
-    <input id="nick-input" type="text" placeholder="Твой ник" maxlength="16">
-    <button id="play-btn">Играть</button>
-    <button id="share-btn">Пригласить друга</button>
-    <div id="menu-stats">Онлайн: <span id="online-count">—</span> · Дуэлей сыграно: <span id="total-games">—</span></div>
-  </div>
+<div id="ammo-wrap">
+  <div id="weapon-name">USP</div>
+  <div id="ammo-count">12</div>
+</div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="game.js"></script>
+<div id="joystick-zone"><div id="joystick-knob"></div></div>
+<button id="switch-btn">СМЕНА<br>ОРУЖИЯ</button>
+<button id="fire-btn">ОГОНЬ</button>
+
+<div id="menu-overlay">
+  <div id="menu-title">🤠 WEST DUEL</div>
+  <div id="menu-subtitle">USP с глушителем — быстрый, слабее.<br>Дигл — редкий, но мощный, с шансом критического выстрела.<br>Критический выстрел валит соперника — добей его, пока он на земле.</div>
+  <button class="diff-btn" id="online-btn" style="background: linear-gradient(#6bb8ff, #3d7ec7); color:#0d1b2a;">🌐 ОНЛАЙН (PvP)</button>
+  <button class="diff-btn" id="diff-easy">🟢 ЛЁГКИЙ БОТ</button>
+  <button class="diff-btn" id="diff-medium">🟡 СРЕДНИЙ БОТ</button>
+  <button class="diff-btn" id="diff-hard">🔴 ТЯЖЁЛЫЙ БОТ</button>
+  <div id="online-counter" style="margin-top:20px; font-size:12px; color:rgba(255,255,255,0.5);">Сейчас играют: <span id="online-count">—</span></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
 </body>
 </html>
