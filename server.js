@@ -5,8 +5,8 @@ const { Telegraf } = require('telegraf');
 const path = require('path');
 const crypto = require('crypto');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const PUBLIC_URL = process.env.PUBLIC_URL;
+const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
 
 if (!BOT_TOKEN || !PUBLIC_URL) {
   console.error('Задайте BOT_TOKEN и PUBLIC_URL в переменных окружения');
