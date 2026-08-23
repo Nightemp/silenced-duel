@@ -19,14 +19,22 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const STATE = { played: 0 };
+const STATE = { played: 0, leaderboard: new Map() }; // name -> wins
 let queue = null; // ws, ожидающий соперника для онлайн-дуэли
+
+function topLeaderboard() {
+  return [...STATE.leaderboard.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, wins]) => ({ name, wins }));
+}
 
 function broadcastStats() {
   const payload = JSON.stringify({
     type: 'stats',
     online: wss.clients.size,
     played: STATE.played,
+    leaderboard: topLeaderboard(),
   });
   wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
 }
@@ -50,6 +58,17 @@ wss.on('connection', ws => {
         STATE.played += 1;
         broadcastStats();
         break;
+
+      // Победа (и против бота, и в онлайне) — засчитывается в общий топ-10.
+      // Имя не проверяется на уникальность специально: это казуальный
+      // лидерборд, а не система аккаунтов.
+      case 'report_win': {
+        const rawName = typeof msg.name === 'string' ? msg.name.trim().slice(0, 24) : '';
+        const name = rawName || 'Безымянный';
+        STATE.leaderboard.set(name, (STATE.leaderboard.get(name) || 0) + 1);
+        broadcastStats();
+        break;
+      }
 
       // ----- матчмейкинг PvP -----
       case 'find_duel':
