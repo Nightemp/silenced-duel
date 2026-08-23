@@ -1,284 +1,159 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>SILENCED — Дуэль</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Silent Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 <style>
-  :root{
-    --accent-red:#ff2d55;
-    --accent-blue:#5566ff;
-    --ink:#e9ebf3;
-    --panel:#0b0d14ee;
-    --panel-border:#232636;
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #05060a; overflow: hidden; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    user-select: none; touch-action: none;
   }
-  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
-  html,body{margin:0; padding:0; height:100%; overflow:hidden; background:#05070c; font-family: 'Segoe UI', system-ui, sans-serif; color:var(--ink);}
-  #game-canvas{position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none;}
-  #game-canvas.bullet-time{ filter: saturate(0.3) contrast(1.18) brightness(1.08); }
+  #canvas-wrap { position: absolute; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
 
-  .hidden{display:none !important;}
-
-  /* ---------- Меню ---------- */
-  #menu{
-    position:fixed; inset:0; z-index:20;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    background: radial-gradient(ellipse at 50% 20%, #14182a 0%, #05070c 65%);
-    padding: 24px;
-    gap: 18px;
-    overflow-y:auto;
-  }
-  .title-wrap{ text-align:center; margin-bottom:6px; }
-  .title-wrap h1{
-    font-size: 44px; letter-spacing: 9px; margin:0;
-    font-weight:800;
-    background: linear-gradient(180deg, #fff 10%, #a9adc4 100%);
-    -webkit-background-clip:text; background-clip:text; color:transparent;
-    text-shadow: 0 0 40px rgba(85,102,255,0.25);
-  }
-  .title-wrap p{
-    margin:6px 0 0; font-size:12px; letter-spacing:5px; color:var(--accent-red);
-    text-transform:uppercase; font-weight:600;
+  #crosshair {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.85);
+    z-index: 4; pointer-events: none;
   }
 
-  .map-toggle{ display:flex; gap:8px; width:100%; max-width:380px; }
-  .map-btn{
-    flex:1; text-align:center; padding:10px 8px; border-radius:10px;
-    border:1px solid var(--panel-border); background:var(--panel);
-    font-size:12px; font-weight:700; letter-spacing:1px; color:#9aa;
-    cursor:pointer; transition:border-color .15s ease, color .15s ease;
+  #hit-marker {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 26px; color: #ff3b3b; opacity: 0; z-index: 5; pointer-events: none;
+    text-shadow: 0 0 10px rgba(255,0,0,0.9);
+    transition: opacity 0.12s;
   }
-  .map-btn.active{ border-color:var(--accent-red); color:#fff; }
+  #hit-marker.show { opacity: 1; }
 
-  .stats-row{ display:flex; gap:10px; }
-  .stat-chip{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
-    padding:8px 16px; font-size:13px; display:flex; align-items:center; gap:8px;
-    min-width:120px; justify-content:center;
+  #xray-popup {
+    position: absolute; top: 70px; left: 50%; transform: translate(-50%, -10px);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    opacity: 0; transition: opacity 0.2s, transform 0.2s; z-index: 6; pointer-events: none;
   }
-  .stat-chip .dot{ width:8px; height:8px; border-radius:50%; background:#37d67a; box-shadow:0 0 8px #37d67a; }
-  .stat-chip b{ color:#fff; font-size:15px; }
-
-  #btn-online{ width:100%; max-width:380px; margin-top:2px; }
-  #waiting-overlay{ display:flex; flex-direction:column; align-items:center; gap:10px; }
-  #waiting-overlay p{ color:#9aa; font-size:13px; letter-spacing:1px; }
-  .spinner{
-    width:26px; height:26px; border-radius:50%;
-    border:3px solid rgba(255,255,255,0.15); border-top-color:var(--accent-red);
-    animation: spin .8s linear infinite;
+  #xray-popup.show { opacity: 1; transform: translate(-50%, 0); }
+  #xray-figure { width: 46px; height: 90px; position: relative; }
+  #xray-figure .zone {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 4px;
   }
-  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #xray-figure .zone.hit { background: rgba(255,50,50,0.85); border-color: #ff9a9a; }
+  #xray-head { top: 0; width: 20px; height: 20px; border-radius: 50%; }
+  #xray-torso { top: 22px; width: 26px; height: 34px; }
+  #xray-arm { top: 24px; width: 8px; height: 30px; left: 4px; transform: none; }
+  #xray-leg { top: 58px; width: 10px; height: 32px; }
+  #xray-label { font-size: 11px; color: #ffb3b3; font-weight: bold; text-shadow: 0 1px 4px #000; }
 
-  .section-label{ font-size:11px; letter-spacing:3px; color:#666a80; text-transform:uppercase; margin-top:4px; }
-
-  .bot-list{ display:flex; flex-direction:column; gap:10px; width:100%; max-width:380px; }
-  .bot-card{
-    background:linear-gradient(135deg, #12141ff0, #0a0b12f0);
-    border:1px solid var(--panel-border); border-radius:14px;
-    padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer;
-    transition: transform .15s ease, border-color .15s ease;
+  #ammo {
+    position: absolute; right: 20px; bottom: 150px; font-size: 15px;
+    color: #fff; text-shadow: 0 2px 4px #000; z-index: 4; font-weight: bold;
   }
-  .bot-card:active{ transform:scale(0.97); border-color:var(--accent-red); }
-  .bot-avatar{
-    width:46px; height:46px; border-radius:50%;
-    background: radial-gradient(circle at 35% 30%, #2a2d3a, #0c0d13);
-    border:2px solid var(--tie-color, #666);
-    flex-shrink:0;
-  }
-  .bot-info{ flex:1; }
-  .bot-info .name{ font-weight:700; font-size:15px; }
-  .bot-info .desc{ font-size:11px; color:#8b8fa8; margin-top:2px; letter-spacing:.5px; }
-  .bot-diff{ display:flex; gap:3px; }
-  .bot-diff span{ width:6px; height:14px; border-radius:2px; background:#232636; }
-  .bot-diff span.on{ background:var(--accent-red); }
-
-  .hint{ font-size:11px; color:#666a80; text-align:center; max-width:320px; line-height:1.6; margin-top:4px;}
-
-  .player-tag{ display:flex; align-items:center; gap:8px; font-size:12px; color:#9aa; }
-  .player-tag input{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:8px;
-    color:#fff; font-size:13px; padding:6px 10px; width:140px; text-align:center;
-  }
-  .rank-badge{
-    font-size:11px; font-weight:700; letter-spacing:1px; padding:4px 10px;
-    border-radius:20px; background:linear-gradient(135deg,#ff2d55,#b1102f); color:#fff;
+  #status {
+    position: absolute; top: 40%; left: 0; right: 0; text-align: center;
+    font-size: 18px; font-weight: bold; text-shadow: 0 2px 4px #000; z-index: 4; pointer-events: none;
   }
 
-  .leaderboard{
-    width:100%; max-width:380px; background:var(--panel); border:1px solid var(--panel-border);
-    border-radius:12px; padding:10px 14px; font-size:12px;
+  #joystick-zone {
+    position: absolute; left: 24px; bottom: 40px; width: 120px; height: 120px;
+    border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.25);
+    z-index: 4;
   }
-  .leaderboard h3{
-    margin:0 0 6px; font-size:11px; letter-spacing:2px; color:#666a80; text-transform:uppercase; font-weight:700;
+  #joystick-knob {
+    position: absolute; left: 46px; top: 46px; width: 28px; height: 28px;
+    border-radius: 50%; background: rgba(255,255,255,0.75);
   }
-  .leaderboard-row{ display:flex; justify-content:space-between; padding:3px 0; color:#c7cadb; }
-  .leaderboard-row .pos{ color:#666a80; width:20px; display:inline-block; }
-  .leaderboard-row.me{ color:#ff5470; font-weight:700; }
-  .leaderboard-empty{ color:#666a80; text-align:center; padding:4px 0; }
+  #look-zone { position: absolute; right: 0; top: 0; width: 60%; height: 100%; z-index: 3; }
 
-  /* ---------- HUD в игре ---------- */
-  #hud{ position:fixed; inset:0; z-index:10; pointer-events:none; }
-  #crosshair{
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-    width:22px; height:22px;
+  #fire-btn {
+    position: absolute; right: 26px; bottom: 46px; width: 92px; height: 92px;
+    border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff5a5a, #a11d1d 70%);
+    border: 3px solid #6e1010; color: #fff; font-weight: bold; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; z-index: 4;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
   }
-  #crosshair::before, #crosshair::after{
-    content:''; position:absolute; background:rgba(233,235,243,0.85);
-  }
-  #crosshair::before{ left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
-  #crosshair::after{ top:50%; left:0; width:100%; height:2px; transform:translateY(-50%); }
+  #fire-btn:active { filter: brightness(0.85); }
+  #fire-btn.reloading { filter: grayscale(0.7) brightness(0.6); }
 
-  #fire-btn{
-    position:absolute; right:24px; bottom:36px; width:84px; height:84px; border-radius:50%;
-    background: radial-gradient(circle at 35% 30%, #ff5470, #b1102f);
-    border:3px solid #ffffff33; box-shadow: 0 6px 20px rgba(255,45,85,0.4);
-    pointer-events:all; display:flex; align-items:center; justify-content:center;
-    font-size:12px; font-weight:800; letter-spacing:2px; color:#fff;
+  #menu-overlay {
+    position: absolute; inset: 0; z-index: 20;
+    background: linear-gradient(#0a0c12, #1a0808);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
   }
-  #fire-btn:active{ transform:scale(0.92); }
+  #menu-title { font-size: 26px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 3px 10px #000; }
+  #nick-input {
+    width: 220px; padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.08); color: #fff; font-size: 15px; text-align: center;
+  }
+  #nick-input::placeholder { color: rgba(255,255,255,0.4); }
+  #play-btn {
+    width: 200px; height: 52px; border-radius: 26px; border: none;
+    background: linear-gradient(#ffe066, #d9a521); color: #1a1410; font-size: 17px; font-weight: bold;
+  }
+  #play-btn:active { transform: scale(0.97); }
+  #share-btn {
+    width: 200px; height: 44px; border-radius: 22px; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.08); color: #fff; font-size: 13px;
+  }
+  #menu-stats { font-size: 12px; color: rgba(255,255,255,0.5); }
+  #menu-stats span { color: #ffe066; font-weight: bold; }
 
-  #enemy-tag{
-    position:absolute; top:18px; left:50%; transform:translateX(-50%);
-    font-size:11px; letter-spacing:3px; color:#9aa; background:#0b0d14bb;
-    padding:6px 14px; border-radius:20px; border:1px solid var(--panel-border);
+  #ko-overlay {
+    position: absolute; inset: 0; z-index: 15; display: none;
+    align-items: center; justify-content: center; flex-direction: column; text-align: center;
+    background: radial-gradient(circle, rgba(120,0,0,0.55), rgba(0,0,0,0.92));
   }
-
-  #countdown{
-    position:fixed; inset:0; z-index:15; display:flex; align-items:center; justify-content:center;
-    font-size:100px; font-weight:900; color:#fff; text-shadow:0 0 30px rgba(255,45,85,0.6);
-    pointer-events:none;
-  }
-  #countdown.fire{ color:var(--accent-red); font-size:64px; letter-spacing:6px; }
-
-  #damage-overlay{
-    position:fixed; inset:0; z-index:12; pointer-events:none;
-    background: radial-gradient(ellipse at center, rgba(200,0,20,0) 40%, rgba(160,0,10,0.65) 100%);
-    opacity:0; transition: opacity .12s ease;
-  }
-
-  /* ---------- Экран результата ---------- */
-  #result{
-    position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    background: rgba(3,4,8,0.88); gap:14px; padding:24px; text-align:center;
-  }
-  #result-title{ font-size:32px; font-weight:900; letter-spacing:4px; }
-  #result-sub{ color:#9aa; font-size:14px; }
-  .btn{
-    margin-top:10px; padding:14px 30px; border-radius:10px; border:1px solid var(--panel-border);
-    background:linear-gradient(135deg,#1a1d2b,#0c0d14); color:#fff; font-weight:700; letter-spacing:2px;
-    font-size:13px; cursor:pointer;
-  }
-  .btn.primary{ background:linear-gradient(135deg,#ff2d55,#b1102f); border-color:transparent; }
-
-  #fire-btn{ touch-action:manipulation; }
-
-  @media (max-height: 640px){
-    .title-wrap h1{ font-size:32px; letter-spacing:6px; }
-  }
+  #ko-overlay.show { display: flex; }
+  #ko-text { font-size: 38px; font-weight: 900; color: #ffdf5e; text-shadow: 0 0 20px rgba(255,80,0,0.9); }
+  #ko-sub { margin-top: 8px; font-size: 15px; color: #fff; }
 </style>
 </head>
 <body>
-
-<canvas id="game-canvas"></canvas>
-
-<div id="menu">
-  <div class="title-wrap">
-    <h1>SILENCED</h1>
-    <p>дуэль один на один</p>
-  </div>
-
-  <div class="stats-row">
-    <div class="stat-chip"><span class="dot"></span> онлайн: <b id="online-count">—</b></div>
-    <div class="stat-chip">🔫 сыграно: <b id="played-count">—</b></div>
-  </div>
-
-  <div class="player-tag">
-    <input id="player-name" type="text" maxlength="24" placeholder="Ваш позывной" />
-    <span class="rank-badge" id="rank-badge">Новичок</span>
-  </div>
-
-  <div class="leaderboard">
-    <h3>🏆 Топ дуэлянтов</h3>
-    <div id="leaderboard-list"><div class="leaderboard-empty">Пока никто не побеждал…</div></div>
-  </div>
-
-  <div class="map-toggle">
-    <div class="map-btn active" id="map-west">☀ ДИКИЙ ЗАПАД</div>
-    <div class="map-btn" id="map-noir">🌙 ТЁМНЫЙ ПЕРЕУЛОК</div>
-  </div>
-
-  <p class="section-label">оружие</p>
-  <div class="map-toggle">
-    <div class="map-btn active" id="weapon-silenced">🔇 С ГЛУШИТЕЛЕМ</div>
-    <div class="map-btn" id="weapon-deagle">💥 DESERT EAGLE</div>
-  </div>
-
-  <button class="btn primary" id="btn-online">🌐 ИГРАТЬ ОНЛАЙН 1×1</button>
-  <div id="waiting-overlay" class="hidden">
-    <div class="spinner"></div>
-    <p>Ищем соперника…</p>
-    <button class="btn" id="btn-cancel-find">Отмена</button>
-  </div>
-
-  <p class="section-label">или дуэль против бота</p>
-  <div class="bot-list" id="bot-list">
-    <div class="bot-card" style="--tie-color:#8b1a1a">
-      <div class="bot-avatar"></div>
-      <div class="bot-info">
-        <div class="name">Виктор «Тень»</div>
-        <div class="desc">Лёгкий — медленная реакция, частые промахи</div>
-      </div>
-      <div class="bot-diff"><span class="on"></span><span></span><span></span></div>
-    </div>
-    <div class="bot-card" style="--tie-color:#1a3a8b">
-      <div class="bot-avatar"></div>
-      <div class="bot-info">
-        <div class="name">Маркус Коул</div>
-        <div class="desc">Средний — уверенный стрелок Континенталя</div>
-      </div>
-      <div class="bot-diff"><span class="on"></span><span class="on"></span><span></span></div>
-    </div>
-    <div class="bot-card" style="--tie-color:#daa520">
-      <div class="bot-avatar"></div>
-      <div class="bot-info">
-        <div class="name">Адам «Континенталь»</div>
-        <div class="desc">Тяжёлый — молниеносный, почти без промаха</div>
-      </div>
-      <div class="bot-diff"><span class="on"></span><span class="on"></span><span class="on"></span></div>
-    </div>
-  </div>
-
-  <p class="hint">Проведите пальцем по экрану, чтобы прицелиться. Кнопка справа — выстрел.
-  Попадание в руку — переключит вас на другую руку. Попадание в ногу — собьёт с ног устойчивость соперника.</p>
-</div>
-
-<div id="hud" class="hidden">
-  <div id="enemy-tag">СОПЕРНИК В 9 МЕТРАХ</div>
+  <div id="canvas-wrap"></div>
   <div id="crosshair"></div>
+  <div id="hit-marker">✕</div>
+  <div id="xray-popup">
+    <div id="xray-figure">
+      <div class="zone" id="xray-head"></div>
+      <div class="zone" id="xray-torso"></div>
+      <div class="zone" id="xray-arm"></div>
+      <div class="zone" id="xray-leg"></div>
+    </div>
+    <div id="xray-label"></div>
+  </div>
+  <div id="ammo">7 / 7</div>
+  <div id="status"></div>
+
+  <div id="look-zone"></div>
+  <div id="joystick-zone"><div id="joystick-knob"></div></div>
   <div id="fire-btn">ОГОНЬ</div>
-</div>
 
-<div id="countdown" class="hidden">3</div>
-<div id="damage-overlay"></div>
+  <div id="ko-overlay">
+    <div id="ko-text"></div>
+    <div id="ko-sub"></div>
+  </div>
 
-<div id="result" class="hidden">
-  <div id="result-title">—</div>
-  <div id="result-sub">—</div>
-  <button class="btn primary" id="btn-retry">ЕЩЁ РАЗ</button>
-  <button class="btn" id="btn-menu">В МЕНЮ</button>
-</div>
+  <div id="menu-overlay">
+    <div id="menu-title">🔫 SILENT DUEL</div>
+    <input id="nick-input" type="text" placeholder="Твой ник" maxlength="16">
+    <button id="play-btn">Играть</button>
+    <button id="share-btn">Пригласить друга</button>
+    <div id="menu-stats">Онлайн: <span id="online-count">—</span> · Дуэлей сыграно: <span id="total-games">—</span></div>
+  </div>
 
-<script>
-  // Telegram Mini App: подгонка под тему/размер
-  if (window.Telegram && window.Telegram.WebApp) {
-    const tg = window.Telegram.WebApp;
-    tg.ready();
-    tg.expand();
-    try { tg.setBackgroundColor('#05070c'); } catch(e){}
-    try { tg.disableVerticalSwipes(); } catch(e){}
-  }
-</script>
-<script type="module" src="game.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>
