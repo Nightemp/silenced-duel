@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/westduel/server.js << 'SERVEREOF'
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -263,5 +262,3 @@ server.listen(process.env.PORT || 3000, () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-SERVEREOF
-echo done
