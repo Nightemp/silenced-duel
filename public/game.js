@@ -17,6 +17,7 @@ const state = {
   screen: 'menu',          // menu | duel | result
   mapType: 'west',         // west | noir
   mode: 'bot',              // bot | online
+  weapon: 'silenced',       // silenced | deagle
   round: 0,
   wins: 0,
   losses: 0,
@@ -31,6 +32,34 @@ const state = {
   ammo: 7,
   reloading: false,
   lastShotAt: 0,
+};
+
+// ---------- Оружие: пистолет с глушителем или Desert Eagle ----------
+const WEAPONS = {
+  silenced: {
+    name: 'Пистолет с глушителем',
+    damage: { head: 999, torso: 55, leftArm: 26, rightArm: 26, leftLeg: 26, rightLeg: 26 },
+    bleedRate: 3,      // потеря HP/сек после ранения в конечность
+    bleedTime: 4.5,    // сколько секунд кровоточит рана
+    cooldown: 260,
+    muzzleIntensity: 6,
+    muzzleDistance: 4,
+    kickAmount: 0.01,
+    sound: { freq: 180, gain: 0.15, type: 'square' },
+    hasSuppressor: true,
+  },
+  deagle: {
+    name: 'Desert Eagle',
+    damage: { head: 999, torso: 78, leftArm: 38, rightArm: 38, leftLeg: 38, rightLeg: 38 },
+    bleedRate: 6,
+    bleedTime: 4.5,
+    cooldown: 430,
+    muzzleIntensity: 11,
+    muzzleDistance: 6,
+    kickAmount: 0.028,
+    sound: { freq: 85, gain: 0.32, type: 'sawtooth' },
+    hasSuppressor: false,
+  },
 };
 
 const BOTS = [
@@ -321,11 +350,26 @@ function buildHumanoid(tieColor, theme) {
     head.add(hair);
   }
 
+  // Воротник пиджака — делает силуэт более "человеческим"/костюмным
+  const collarMat = new THREE.MeshStandardMaterial({ color: isWest ? 0x4a3626 : 0x08090b, roughness: 0.5 });
+  for (const sign of [-1, 1]) {
+    const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.03), collarMat);
+    lapel.position.set(sign * 0.09, 0.63, 0.14);
+    lapel.rotation.z = sign * 0.35;
+    torso.add(lapel);
+  }
+  const shirtCollar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 0.03), new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.6 }));
+  shirtCollar.position.set(0, 0.72, 0.13);
+  torso.add(shirtCollar);
+
   function buildArm(side) {
     const sign = side === 'left' ? -1 : 1;
     const shoulder = new THREE.Group();
     shoulder.position.set(sign * 0.32, 0.62, 0);
     pelvis.add(shoulder);
+
+    const shoulderJoint = new THREE.Mesh(new THREE.SphereGeometry(0.078, 10, 10), suitMat);
+    shoulder.add(shoulderJoint);
 
     const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.28, 4, 8), suitMat);
     upper.position.y = -0.16;
@@ -335,6 +379,9 @@ function buildHumanoid(tieColor, theme) {
     const elbow = new THREE.Group();
     elbow.position.y = -0.32;
     shoulder.add(elbow);
+
+    const elbowJoint = new THREE.Mesh(new THREE.SphereGeometry(0.062, 10, 10), skinMat);
+    elbow.add(elbowJoint);
 
     const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.26, 4, 8), skinMat);
     lower.position.y = -0.14;
@@ -347,6 +394,12 @@ function buildHumanoid(tieColor, theme) {
 
     const handMesh = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), skinMat);
     hand.add(handMesh);
+    for (let f = -1; f <= 1; f++) {
+      const finger = new THREE.Mesh(new THREE.CapsuleGeometry(0.009, 0.05, 3, 6), skinMat);
+      finger.position.set(f * 0.018, -0.045, 0.015);
+      finger.rotation.x = 0.3;
+      handMesh.add(finger);
+    }
 
     shoulder.name = side + 'Arm';
     shoulder.userData.part = side + 'Arm';
@@ -369,6 +422,9 @@ function buildHumanoid(tieColor, theme) {
     knee.position.y = -0.38;
     hip.add(knee);
 
+    const kneeJoint = new THREE.Mesh(new THREE.SphereGeometry(0.082, 10, 10), suitMat);
+    knee.add(kneeJoint);
+
     const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.32, 4, 8), suitMat);
     lower.position.y = -0.18;
     lower.castShadow = true;
@@ -389,29 +445,9 @@ function buildHumanoid(tieColor, theme) {
   const leftLeg = buildLeg('left');
   const rightLeg = buildLeg('right');
 
-  function buildGun() {
-    const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: 0.3, metalness: 0.85 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.09, 0.19), bodyMat);
-    g.add(body);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.22, 10), bodyMat);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.015, -0.2);
-    g.add(barrel);
-    const suppressor = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.16, 10), new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.4, metalness: 0.9 }));
-    suppressor.rotation.x = Math.PI / 2;
-    suppressor.position.set(0, 0.015, -0.36);
-    g.add(suppressor);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.09, 0.05), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.7 }));
-    grip.position.set(0, -0.07, 0.06);
-    grip.rotation.x = 0.35;
-    g.add(grip);
-    return g;
-  }
-
-  const gunR = buildGun();
+  const gunR = buildGunModel(state.weapon, 0.75);
   rightArm.userData.hand.add(gunR);
-  const gunL = buildGun();
+  const gunL = buildGunModel(state.weapon, 0.75);
   gunL.visible = false;
   leftArm.userData.hand.add(gunL);
 
@@ -423,10 +459,65 @@ function buildHumanoid(tieColor, theme) {
     shootHand: 'right',
     limbState: { leftArm: true, rightArm: true, leftLeg: true, rightLeg: true },
     baseY: 0,
+    health: 100,
+    maxHealth: 100,
+    bleeding: [],       // { rate, timeLeft } — активные кровотечения от ранений в конечности
+    fallSeed: 0,
+    deathT: 0,
   };
 
   root.scale.setScalar(1.12);
   return root;
+}
+
+// ---------- Оружие: единый конструктор для NPC-руки и FP-вида ----------
+// scale ~0.75 — уменьшенная версия в руке персонажа, ~1 — полноразмерная у камеры
+function buildGunModel(kind, scale = 1) {
+  const g = new THREE.Group();
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: 0.25, metalness: 0.9 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.7 });
+
+  if (kind === 'deagle') {
+    // Крупный, угловатый — характерный силуэт Desert Eagle
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.27), dark);
+    g.add(body);
+    const barrelShroud = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.045, 0.14), dark);
+    barrelShroud.position.set(0, 0.05, -0.18);
+    g.add(barrelShroud);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.16, 0.075), gripMat);
+    grip.position.set(0, -0.12, 0.1);
+    grip.rotation.x = 0.32;
+    g.add(grip);
+    const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.03, 0.02), dark);
+    hammer.position.set(0, 0.08, 0.13);
+    g.add(hammer);
+    const trigger = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 6, 12), dark);
+    trigger.position.set(0, -0.05, 0.05);
+    g.add(trigger);
+  } else {
+    // Компактный пистолет с глушителем
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.09, 0.19), dark);
+    g.add(body);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.22, 10), dark);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.015, -0.2);
+    g.add(barrel);
+    const suppressor = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, 0.2, 10),
+      new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.4, metalness: 0.9 })
+    );
+    suppressor.rotation.x = Math.PI / 2;
+    suppressor.position.set(0, 0.015, -0.38);
+    g.add(suppressor);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.09, 0.05), gripMat);
+    grip.position.set(0, -0.07, 0.06);
+    grip.rotation.x = 0.35;
+    g.add(grip);
+  }
+
+  g.scale.setScalar(scale);
+  g.userData.kind = kind;
+  return g;
 }
 
 // ---------- Игрок: видимые руки/оружие от первого лица ----------
@@ -434,23 +525,8 @@ const fpRig = new THREE.Group();
 camera.add(fpRig);
 scene.add(camera);
 
-function buildFPGun() {
-  const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: 0.25, metalness: 0.9 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.24), bodyMat);
-  g.add(body);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.26, 12), bodyMat);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.02, -0.24);
-  g.add(barrel);
-  const suppressor = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.2, 12), new THREE.MeshStandardMaterial({ color: 0x26282d, roughness: 0.35, metalness: 0.95 }));
-  suppressor.rotation.x = Math.PI / 2;
-  suppressor.position.set(0, 0.02, -0.46);
-  g.add(suppressor);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.12, 0.06), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.7 }));
-  grip.position.set(0, -0.09, 0.08);
-  grip.rotation.x = 0.3;
-  g.add(grip);
+function buildFPGun(kind) {
+  const g = buildGunModel(kind, 1);
   const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.22, 8), new THREE.MeshStandardMaterial({ color: SUIT, roughness: 0.5 }));
   sleeve.rotation.z = Math.PI / 2;
   sleeve.position.set(0.02, -0.12, 0.22);
@@ -458,16 +534,33 @@ function buildFPGun() {
   return g;
 }
 
-const fpGunRight = buildFPGun();
+let fpGunRight = buildFPGun(state.weapon);
 fpGunRight.position.set(0.16, -0.16, -0.35);
 fpGunRight.rotation.y = -0.05;
 fpRig.add(fpGunRight);
 
-const fpGunLeft = buildFPGun();
+let fpGunLeft = buildFPGun(state.weapon);
 fpGunLeft.position.set(-0.16, -0.16, -0.35);
 fpGunLeft.rotation.y = 0.05;
 fpGunLeft.visible = false;
 fpRig.add(fpGunLeft);
+
+// Пересобрать FP-оружие при смене выбора в меню
+function rebuildFPWeapon() {
+  fpRig.remove(fpGunRight);
+  fpRig.remove(fpGunLeft);
+  fpGunRight = buildFPGun(state.weapon);
+  fpGunRight.position.set(0.16, -0.16, -0.35);
+  fpGunRight.rotation.y = -0.05;
+  fpGunRight.visible = state.shootHand === 'right';
+  fpRig.add(fpGunRight);
+
+  fpGunLeft = buildFPGun(state.weapon);
+  fpGunLeft.position.set(-0.16, -0.16, -0.35);
+  fpGunLeft.rotation.y = 0.05;
+  fpGunLeft.visible = state.shootHand === 'left';
+  fpRig.add(fpGunLeft);
+}
 
 const muzzleLight = new THREE.PointLight(0xffdca0, 0, 4, 2);
 camera.add(muzzleLight);
@@ -542,9 +635,50 @@ function switchShootingHand(unit, hand) {
   }
 }
 
-function killUnit(unit) {
-  unit.userData.alive = false;
-  unit.userData.deathT = 0;
+function killUnit(unit, impactDir = null) {
+  const d = unit.userData;
+  if (!d.alive) return;
+  d.alive = false;
+  d.deathT = 0;
+  d.health = 0;
+  d.bleeding.length = 0;
+
+  // Направление и стиль падения: если известно направление удара — падает
+  // назад от него, иначе случайно вперёд/назад/набок — выглядит менее шаблонно.
+  const dir = impactDir || (Math.random() < 0.5 ? 1 : -1);
+  d.fallBackward = dir >= 0;
+  d.fallSide = (Math.random() - 0.5) * 2;   // -1..1 — наклон вбок при падении
+  d.fallSpin = (Math.random() - 0.5) * 1.4; // лёгкое вращение корпуса при падении
+  d.fallStartPos = d.pelvis.position.clone();
+}
+
+/* Применяет урон юниту с учётом части тела и активного оружия, решает,
+   наступила ли смерть — либо мгновенно (голова / фатальный урон в торс),
+   либо позже от кровопотери (обрабатывается в игровом цикле). */
+function applyDamage(unit, partKey, weaponKey) {
+  const d = unit.userData;
+  if (!d.alive) return { lethal: false };
+  const weapon = WEAPONS[weaponKey];
+  const dmg = weapon.damage[partKey] ?? 20;
+
+  if (partKey === 'head') {
+    killUnit(unit, unit === enemyUnit ? -1 : 1);
+    return { lethal: true, instant: true };
+  }
+
+  d.health = Math.max(0, d.health - dmg);
+
+  if (partKey !== 'torso') {
+    // Ранение в конечность дополнительно кровоточит — смерть может
+    // наступить чуть позже от потери крови, даже если сам выстрел не убил.
+    d.bleeding.push({ rate: weapon.bleedRate, timeLeft: weapon.bleedTime });
+  }
+
+  if (d.health <= 0) {
+    killUnit(unit, unit === enemyUnit ? -1 : 1);
+    return { lethal: true, instant: false };
+  }
+  return { lethal: false };
 }
 
 // ---------- Создание игрока и противника ----------
@@ -620,7 +754,7 @@ function tryPlayerShoot() {
   if (bulletTimeActive) return;
   if (!enemyUnit.userData.alive) return;
   if (!state.playerLimbs.leftArm && !state.playerLimbs.rightArm) return;
-  if (Date.now() - state.lastShotAt < 260) return;
+  if (Date.now() - state.lastShotAt < WEAPONS[state.weapon].cooldown) return;
   state.lastShotAt = Date.now();
   playerFire();
 }
@@ -635,9 +769,10 @@ addEventListener('keydown', e => { if (e.code === 'Space') tryPlayerShoot(); });
 // ---------- Выстрел игрока ----------
 const raycaster = new THREE.Raycaster();
 function playerFire() {
-  muzzleFlash(state.shootHand === 'right' ? fpGunRight : fpGunLeft);
-  screenKick();
-  playSound('shot');
+  const weapon = WEAPONS[state.weapon];
+  muzzleFlash(state.shootHand === 'right' ? fpGunRight : fpGunLeft, weapon);
+  screenKick(weapon);
+  playSound('shot', weapon);
   if (state.mode === 'online') sendOnline({ type: 'shot' });
 
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
@@ -729,7 +864,7 @@ function resolveHit(unit, mesh, point) {
   const partKey = findPartKeyFromMesh(mesh);
   if (!partKey) return;
   playSound('hit');
-  if (state.mode === 'online') sendOnline({ type: 'hit', part: partKey });
+  if (state.mode === 'online') sendOnline({ type: 'hit', part: partKey, weapon: state.weapon });
 
   if (partKey === 'head') {
     const gunObj = state.shootHand === 'right' ? fpGunRight : fpGunLeft;
@@ -737,25 +872,27 @@ function resolveHit(unit, mesh, point) {
     gunObj.getWorldPosition(fromPos);
     playHeadshotBulletCam(fromPos, point.clone(), () => {
       spawnBlood(point, 34);
+      applyDamage(unit, 'head', state.weapon);
       if (unit === enemyUnit) endRound(true); else endRound(false);
     });
     return;
   }
 
-  spawnBlood(point, 18);
+  spawnBlood(point, partKey === 'torso' ? 24 : 18);
+  const result = applyDamage(unit, partKey, state.weapon);
 
-  if (partKey === 'torso') {
-    if (unit === enemyUnit) endRound(true); else endRound(false);
-    return;
-  }
-  if (unit === enemyUnit) {
+  if (partKey !== 'torso' && unit === enemyUnit && !result.lethal) {
     detachLimb(unit, partKey);
-  } else {
+  } else if (partKey !== 'torso' && unit === playerUnit && !result.lethal) {
     applyPlayerLimbHit(partKey);
+  }
+
+  if (result.lethal) {
+    if (unit === enemyUnit) endRound(true); else endRound(false);
   }
 }
 
-// ---------- Урон игроку от бота / соперника ----------
+// ---------- Урон игроку от бота / соперника (только визуал конечности — здоровьем управляет applyDamage) ----------
 function applyPlayerLimbHit(limbKey) {
   if (!state.playerLimbs[limbKey]) return;
   state.playerLimbs[limbKey] = false;
@@ -773,37 +910,88 @@ function applyPlayerLimbHit(limbKey) {
 }
 
 let playerLimping = false;
+let playerDeathFallT = 0;
 
+/* Кровопотеря: раны в конечности продолжают отнимать HP какое-то время
+   после попадания. Если это добивает юнита — вызывается onDeath (расчёт
+   момента смерти идёт именно здесь, а не только в момент выстрела). */
+function processBleeding(unit, dt, onDeath) {
+  const d = unit.userData;
+  if (!d.alive || d.bleeding.length === 0) return;
+  let loss = 0;
+  for (let i = d.bleeding.length - 1; i >= 0; i--) {
+    const b = d.bleeding[i];
+    b.timeLeft -= dt;
+    loss += b.rate * dt;
+    if (b.timeLeft <= 0) d.bleeding.splice(i, 1);
+  }
+  if (loss > 0) {
+    d.health = Math.max(0, d.health - loss);
+    if (d.health <= 0) {
+      killUnit(unit, unit === enemyUnit ? -1 : 1);
+      onDeath();
+    }
+  }
+}
+
+/* Полноценное падение тела при смерти: таз проседает к полу, корпус
+   заваливается вперёд/назад (в зависимости от направления попадания)
+   с небольшим боковым наклоном и вращением — выглядит как обмякшее тело,
+   а не просто "наклон на месте". */
+function updateRagdollFall(unit, dt) {
+  const d = unit.userData;
+  if (d.alive) return;
+  d.deathT += dt;
+  const t = Math.min(d.deathT / 1.15, 1);
+  const ease = t < 1 ? 1 - Math.pow(1 - t, 3) : 1;
+
+  const fallPitch = (d.fallBackward ? -1 : 1) * 1.45;
+  d.pelvis.rotation.x = fallPitch * ease;
+  d.pelvis.rotation.z = d.fallSide * 0.5 * ease;
+  d.pelvis.rotation.y += d.fallSpin * dt * (1 - ease * 0.7);
+  d.pelvis.position.y = 0.95 * (1 - ease * 0.88);
+  d.pelvis.position.x = d.fallStartPos.x + d.fallSide * 0.35 * ease;
+  d.pelvis.position.z = d.fallStartPos.z + (d.fallBackward ? -1 : 1) * 0.25 * ease;
+}
+
+// Вызывается либо сразу (мгновенная смерть от головы/фатального урона),
+// либо из игрового цикла, когда кровопотеря от ранений добивает юнита.
 function endRound(playerWon) {
+  if (state.duelPhase === 'resolved') return;
   state.duelPhase = 'resolved';
   if (playerWon) {
-    killUnit(enemyUnit);
+    if (enemyUnit.userData.alive) killUnit(enemyUnit, -1);
     state.wins++;
   } else {
+    if (playerUnit.userData.alive) killUnit(playerUnit, 1);
     state.losses++;
     flashDamage(1);
   }
-  setTimeout(() => showResult(playerWon), 900);
+  if (state.mode === 'online') sendOnline({ type: 'duel_over' });
+  setTimeout(() => showResult(playerWon), 1300);
 }
 
 // ---------- Визуальные эффекты выстрела/урона ----------
-function muzzleFlash(gunObj) {
-  muzzleLight.intensity = 6;
+function muzzleFlash(gunObj, weapon = WEAPONS.silenced) {
+  muzzleLight.intensity = weapon.muzzleIntensity;
+  muzzleLight.distance = weapon.muzzleDistance;
   muzzleLight.position.copy(gunObj.position);
-  setTimeout(() => (muzzleLight.intensity = 0), 60);
+  setTimeout(() => (muzzleLight.intensity = 0), weapon.hasSuppressor ? 55 : 85);
 }
 function enemyMuzzleFlash() {
+  const weapon = WEAPONS[state.weapon];
   const eData = enemyUnit.userData;
   const gunObj = eData.shootHand === 'left' ? eData.guns.left : eData.guns.right;
   const pos = new THREE.Vector3();
   gunObj.getWorldPosition(pos);
-  const light = new THREE.PointLight(0xffdca0, 6, 4, 2);
+  const light = new THREE.PointLight(0xffdca0, weapon.muzzleIntensity, weapon.muzzleDistance, 2);
   light.position.copy(pos);
   scene.add(light);
-  setTimeout(() => scene.remove(light), 60);
+  setTimeout(() => scene.remove(light), weapon.hasSuppressor ? 55 : 85);
 }
-function screenKick() {
-  camera.rotation.z += (Math.random() - 0.5) * 0.01;
+function screenKick(weapon = WEAPONS.silenced) {
+  camera.rotation.z += (Math.random() - 0.5) * weapon.kickAmount;
+  state.aimPitch -= weapon.kickAmount * 1.2;
 }
 const damageOverlay = document.getElementById('damage-overlay');
 function flashDamage(strength = 0.55) {
@@ -813,18 +1001,23 @@ function flashDamage(strength = 0.55) {
 
 // ---------- Звук через WebAudio ----------
 let audioCtx;
-function playSound(type) {
+function playSound(type, weapon = WEAPONS[state.weapon]) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.connect(g); g.connect(audioCtx.destination);
-    if (type === 'shot') { o.frequency.value = 180; g.gain.value = 0.15; o.type = 'square'; }
+    if (type === 'shot') {
+      o.frequency.value = weapon.sound.freq;
+      g.gain.value = weapon.sound.gain;
+      o.type = weapon.sound.type;
+    }
     else if (type === 'hit') { o.frequency.value = 90; g.gain.value = 0.2; o.type = 'sawtooth'; }
     else { o.frequency.value = 260; g.gain.value = 0.05; o.type = 'sine'; }
     o.start();
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
-    o.stop(audioCtx.currentTime + 0.2);
+    const tail = type === 'shot' && !weapon.hasSuppressor ? 0.32 : 0.18;
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + tail);
+    o.stop(audioCtx.currentTime + tail + 0.02);
   } catch (e) { /* аудио недоступно */ }
 }
 
@@ -855,18 +1048,19 @@ function botFire(bot) {
     gunObj.getWorldPosition(fromPos);
     playHeadshotBulletCam(fromPos, toPos.clone(), () => {
       spawnBlood(toPos.clone().add(new THREE.Vector3(0, -0.05, -0.05)), 30);
+      applyDamage(playerUnit, 'head', state.weapon);
       endRound(false);
     });
     return;
   }
 
-  spawnBlood(toPos.clone().add(new THREE.Vector3(0, -0.2, -0.3)), 14);
+  spawnBlood(toPos.clone().add(new THREE.Vector3(0, -0.2, -0.3)), partKey === 'torso' ? 22 : 14);
+  const result = applyDamage(playerUnit, partKey, state.weapon);
 
-  if (partKey === 'torso') {
-    endRound(false);
-  } else {
+  if (partKey !== 'torso' && !result.lethal) {
     applyPlayerLimbHit(partKey);
   }
+  if (result.lethal) endRound(false);
 }
 
 // ---------- Управление раундом дуэли ----------
@@ -911,10 +1105,13 @@ function resetUnits() {
 
   state.playerLimbs = { leftArm: true, rightArm: true, leftLeg: true, rightLeg: true, alive: true };
   playerLimping = false;
+  playerDeathFallT = 0;
   state.shootHand = 'right';
+  rebuildFPWeapon();
   fpGunRight.visible = true;
   fpGunLeft.visible = false;
   camera.rotation.set(0, 0, 0);
+  camera.position.y = 1.7;
   camera.fov = BASE_FOV;
   camera.updateProjectionMatrix();
   state.aimYaw = 0; state.aimPitch = 0;
@@ -996,6 +1193,25 @@ if (mapButtons.noir) mapButtons.noir.addEventListener('click', () => { applyMapT
 applyMapTheme(state.mapType);
 refreshMapButtons();
 
+// ---------- Переключатель оружия в меню ----------
+const weaponButtons = {
+  silenced: document.getElementById('weapon-silenced'),
+  deagle: document.getElementById('weapon-deagle'),
+};
+function refreshWeaponButtons() {
+  Object.entries(weaponButtons).forEach(([k, el]) => el && el.classList.toggle('active', state.weapon === k));
+}
+function selectWeapon(kind) {
+  state.weapon = kind;
+  rebuildFPWeapon();
+  fpGunRight.visible = state.shootHand === 'right';
+  fpGunLeft.visible = state.shootHand === 'left';
+  refreshWeaponButtons();
+}
+if (weaponButtons.silenced) weaponButtons.silenced.addEventListener('click', () => selectWeapon('silenced'));
+if (weaponButtons.deagle) weaponButtons.deagle.addEventListener('click', () => selectWeapon('deagle'));
+refreshWeaponButtons();
+
 // ---------- Онлайн-счётчик, число сыгранных дуэлей и PvP-матчмейкинг ----------
 let ws;
 function connectWS() {
@@ -1021,13 +1237,15 @@ function connectWS() {
           enemyMuzzleFlash();
           playSound('shot');
           break;
-        case 'you_were_hit':
-          if (data.part === 'head' || data.part === 'torso') {
-            endRound(false);
-          } else {
+        case 'you_were_hit': {
+          const weaponKey = WEAPONS[data.weapon] ? data.weapon : state.weapon;
+          const result = applyDamage(playerUnit, data.part, weaponKey);
+          if (data.part !== 'torso' && data.part !== 'head' && !result.lethal) {
             applyPlayerLimbHit(data.part);
           }
+          if (result.lethal) endRound(false);
           break;
+        }
         case 'opponent_left':
           handleOpponentLeft();
           break;
@@ -1128,21 +1346,32 @@ function animate() {
     }
   }
 
+  processBleeding(enemyUnit, dt, () => { if (state.duelPhase === 'fight') endRound(true); });
+  processBleeding(playerUnit, dt, () => { if (state.duelPhase === 'fight') endRound(false); });
+
   if (enemyUnit) {
     const eData = enemyUnit.userData;
-    if (eData.limping) {
+    if (eData.limping && eData.alive) {
       const tilt = 0.18;
       eData.pelvis.rotation.z += (tilt - eData.pelvis.rotation.z) * 0.08;
     }
-    if (!eData.alive) {
-      eData.deathT = (eData.deathT || 0) + dt;
-      const t = Math.min(eData.deathT / 0.9, 1);
-      eData.pelvis.rotation.x = t * 1.35;
-      eData.pelvis.position.y = 0.95 * (1 - t * 0.85);
-    }
+    updateRagdollFall(enemyUnit, dt);
   }
-  if (playerUnit && playerLimping) {
-    playerUnit.userData.pelvis.rotation.z += (0.18 - playerUnit.userData.pelvis.rotation.z) * 0.08;
+  if (playerUnit) {
+    if (playerLimping && playerUnit.userData.alive) {
+      playerUnit.userData.pelvis.rotation.z += (0.18 - playerUnit.userData.pelvis.rotation.z) * 0.08;
+    }
+    updateRagdollFall(playerUnit, dt);
+    if (!playerUnit.userData.alive) {
+      // Игрок видит мир от первого лица — камера "оседает" вместе с телом,
+      // как будто он теряет сознание и падает.
+      playerDeathFallT = Math.min(playerDeathFallT + dt, 1.3);
+      const t = Math.min(playerDeathFallT / 1.1, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      camera.position.y = 1.7 - ease * 1.35;
+      camera.rotation.z = (playerUnit.userData.fallSide || 0) * ease * 0.5;
+      camera.rotation.x += ease * 0.02 * dt * 60;
+    }
   }
 
   dust.rotation.y += dt * 0.01;
