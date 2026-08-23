@@ -84,13 +84,16 @@ wss.on('connection', ws => {
         break;
 
       case 'hit':
-        if (ws.opponent) send(ws.opponent, { type: 'you_were_hit', part: msg.part });
-        if (msg.part === 'head' || msg.part === 'torso') {
-          STATE.played += 1;
-          broadcastStats();
-          if (ws.opponent) ws.opponent.opponent = null;
-          ws.opponent = null;
-        }
+        if (ws.opponent) send(ws.opponent, { type: 'you_were_hit', part: msg.part, weapon: msg.weapon });
+        break;
+
+      // Клиент, у которого юнит умер (мгновенно или от кровопотери),
+      // сообщает об этом явно — так матч закрывается в правильный момент.
+      case 'duel_over':
+        STATE.played += 1;
+        broadcastStats();
+        if (ws.opponent) ws.opponent.opponent = null;
+        ws.opponent = null;
         break;
     }
   });
